@@ -1,0 +1,122 @@
+const { app, BrowserWindow, protocol, ipcMain, dialog } = require("electron");
+const path = require("path");
+const fs = require("fs");
+const { pathToFileURL } = require("url");
+
+const OUT_DIR = path.join(__dirname, "..", "out");
+
+// Маппим file:///_next/*, /fonts/*, /images/* и т.п. в out/*
+function interceptStatic() {
+  protocol.interceptFileProtocol("file", (request, callback) => {
+    try {
+      const raw = decodeURI(request.url).replace(/^file:\/\//, "");
+      if (
+        raw.startsWith("/_next/") ||
+        raw.startsWith("/fonts/") ||
+        raw.startsWith("/images/") ||
+        /^\/(favicon|icon|apple|manifest)/.test(raw)
+      ) {
+        return callback({ path: path.join(OUT_DIR, raw) });
+      }
+      if (path.isAbsolute(raw)) return callback({ path: raw });
+      return callback({ path: raw });
+    } catch (e) {
+      console.error("[intercept error]", e);
+      callback({ path: request.url.replace(/^file:\/\//, "") });
+    }
+  });
+}
+
+function createWindow() {
+  const win = new BrowserWindow({
+    width: 1440,
+    height: 900,
+    webPreferences: { preload: path.join(__dirname, "preload.js") },
+  });
+  const indexPath = path.join(OUT_DIR, "index.html");
+  const fileUrl = pathToFileURL(indexPath).toString();
+  console.log("[MAIN] loadURL:", fileUrl);
+  win.loadURL(fileUrl);
+  return win;
+}
+
+// === Полноразмерный PNG ===
+
+function buildMenu() {
+  const template = [
+    {
+      label: "File",
+      submenu: [
+        {
+          label: "Export Full Page PNG…",
+          accelerator: "CommandOrControl+Shift+P",
+          click: (_, focusedWindow) => captureFullPage(focusedWindow),
+        },
+        { type: "separator" },
+        { role: "close" },
+      ],
+    },
+    { role: "editMenu" },
+    { role: "viewMenu" },
+    { role: "windowMenu" },
+  ];
+  const menu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(menu);
+}
+
+app.whenReady().then(() => {
+  interceptStatic();
+  const win = createWindow();
+  buildMenu();
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+    }
+  });
+});
+
+app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
+
+app.whenReady().then(()=>{
+  const {BrowserWindow}=require("electron");
+  const {ipcMain}=require("electron");
+  ipcMain.handle("export-fullpage-png",async(e)=>{
+    const win=BrowserWindow.fromWebContents(e.sender);
+    await captureFullPagePNG(win);
+  });
+});
+
+
+
+
+
+async function captureFullPage(targetWin){
+  if(!targetWin) return {ok:false, reason:'no-window'};
+  const wc = targetWin.webContents;
+  const info = await wc.executeJavaScript(`(() => {
+    const pick = () => (
+      document.scrollingElement ||
+      document.querySelector('main') ||
+      document.getElementById('__next') ||
+      document.body || document.documentElement
+    );
+    const s = pick();
+    return { totalWidth: s.scrollWidth, totalHeight: s.scrollHeight, dpr: devicePixelRatio||1 };
+  })()`, true);
+  const { totalWidth, totalHeight } = info || {};
+  if(!totalWidth || !totalHeight) return {ok:false, reason:'bad-size'};
+  const before = targetWin.getContentBounds();
+  try{
+    targetWin.setContentSize(Math.max(totalWidth, 800), Math.max(totalHeight, 600));
+    await new Promise(r=>setTimeout(r,180));
+    const image = await wc.capturePage();
+    const { canceled, filePath } = await dialog.showSaveDialog(targetWin, {
+      title:'Save PNG',
+      defaultPath:`onepager-${new Date().toISOString().split('T')[0]}.png`,
+      filters:[{name:'PNG Image', extensions:['png']}]
+    });
+    if(!canceled && filePath){ require('fs').writeFileSync(filePath, image.toPNG()); return {ok:true, filePath}; }
+    return {ok:false, reason:'canceled'};
+  }catch(e){ console.error('[captureFullPage]',e); return {ok:false, reason:String(e)}; }
+  finally{ targetWin.setContentSize(before.width, before.height); }
+}

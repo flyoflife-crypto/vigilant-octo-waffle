@@ -1,0 +1,54 @@
+const { app, BrowserWindow, protocol } = require("electron");
+const path = require("path");
+const OUT_DIR = path.join(__dirname, "..", "out");
+
+function interceptStatic() {
+  protocol.interceptFileProtocol("file", (request, callback) => {
+    try {
+      const raw = decodeURI(request.url).replace(/^file:\/\//, "");
+
+      // 1) Next.js абсолюты под file://
+      if (
+        raw.startsWith("/_next/") ||
+        raw.startsWith("/fonts/") ||
+        raw.startsWith("/images/") ||
+        /^\/(favicon|icon|apple|manifest)/.test(raw)
+      ) {
+        return callback({ path: path.join(OUT_DIR, raw) });
+      }
+
+      // 2) Любой реальный абсолютный путь ОС — не трогаем
+      if (path.isAbsolute(raw)) {
+        return callback({ path: raw });
+      }
+
+      // 3) Остальное — как есть
+      return callback({ path: raw });
+    } catch (e) {
+      console.error("[intercept error]", e);
+      callback({ path: request.url.replace(/^file:\/\//, "") });
+    }
+  });
+}
+
+function createWindow() {
+  const win = new BrowserWindow({
+    width: 1440,
+    height: 900,
+    webPreferences: { preload: path.join(__dirname, "preload.js") },
+  });
+
+  const indexPath = path.join(OUT_DIR, "index.html");
+  console.log("[MAIN] loadFile:", indexPath);
+  win.loadFile(indexPath);
+  win.webContents.openDevTools({ mode: "detach" });
+}
+
+app.whenReady().then(() => {
+  interceptStatic();
+  createWindow();
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
+app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });

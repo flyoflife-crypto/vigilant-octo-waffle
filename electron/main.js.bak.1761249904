@@ -1,0 +1,70 @@
+const { app, BrowserWindow, protocol } = require('electron');
+const path = require('path');
+
+let mainWindow;
+
+function createWindow() {
+  const preloadPath = path.join(__dirname, 'preload.js');
+
+  mainWindow = new BrowserWindow({
+    width: 1280,
+    height: 800,
+    webPreferences: {
+      contextIsolation: true,
+      sandbox: true,
+      preload: preloadPath,
+    },
+  });
+
+  const indexPath = path.join(__dirname, '..', 'out', 'index.html');
+
+  mainWindow.webContents.on('did-fail-load', (_e, code, desc, url) => {
+    console.error('[MAIN] did-fail-load', { code, desc, url });
+  });
+  mainWindow.webContents.on('did-finish-load', () => {
+    console.log('[MAIN] did-finish-load');
+    // mainWindow.webContents.openDevTools({ mode: 'detach' }); // при необходимости
+  });
+
+  // Грузим статический экспорт Next
+  mainWindow.loadFile(indexPath).catch((err) => {
+    console.error('[MAIN] loadFile error', err);
+  });
+}
+
+app.whenReady().then(() => {
+  const outDir = path.join(__dirname, '..', 'out');
+
+  // Перехватываем file:// чтобы резолвить корневые пути /_next/* и т.п. внутрь out/
+  try {
+    protocol.interceptFileProtocol('file', (request, callback) => {
+      let p = decodeURI(request.url.replace('file:///', ''));
+
+      // root-absolute ассеты из Next export
+      if (p.startsWith('_next/')) {
+        return callback(path.join(outDir, p));
+      }
+
+      // фавикон/иконки/статические файлы рядом с index.html
+      if (['favicon.ico', 'icon.png', 'apple-touch-icon.png', 'manifest.json'].some(f => p === f || p.endsWith('/' + f))) {
+        return callback(path.join(outDir, path.basename(p)));
+      }
+
+      // как есть — абсолютный путь уже корректный
+      return callback(p);
+    });
+    console.log('[MAIN] protocol intercept for file:// set');
+  } catch (e) {
+    console.warn('[MAIN] protocol intercept failed', e);
+  }
+
+  createWindow();
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit();
+});

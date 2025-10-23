@@ -1,0 +1,97 @@
+const { app, BrowserWindow, dialog } = require('electron');
+const path = require('path');
+const fs = require('fs');
+const { pathToFileURL } = require('url');
+
+let win;
+
+/** Глобальный логгер в консоль main-процесса */
+function log(...args) {
+  console.log('[MAIN]', ...args);
+}
+
+function createWindow() {
+  try {
+    log('creating window…');
+    win = new BrowserWindow({
+      width: 1280,
+      height: 800,
+      show: false,
+      webPreferences: {
+        preload: path.join(__dirname, 'preload.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    });
+
+    const OUT_DIR = path.join(__dirname, '..', 'out');
+    const indexPath = path.join(OUT_DIR, 'index.html');
+
+    if (!fs.existsSync(indexPath)) {
+      const msg = `Не найден out/index.html по пути:\n${indexPath}\nСначала выполните: npm run build:web`;
+      log('ERROR:', msg);
+      dialog.showErrorBox('Файл не найден', msg);
+      return;
+    }
+
+    const fileUrl = pathToFileURL(indexPath).toString();
+    log('loadURL:', fileUrl);
+
+    // Диагностика загрузки
+    const wc = win.webContents;
+    wc.on('did-fail-load', (_ev, code, desc, url, isMainFrame) => {
+      log('did-fail-load:', { code, desc, url, isMainFrame });
+      dialog.showErrorBox('Ошибка загрузки', `${desc} (code ${code})\nURL: ${url}`);
+    });
+    wc.on('render-process-gone', (_ev, details) => {
+      log('render-process-gone:', details);
+      dialog.showErrorBox('Renderer упал', JSON.stringify(details, null, 2));
+    });
+    wc.on('console-message', (_e, level, message) => {
+      log('[renderer]', message);
+    });
+
+    win.on('ready-to-show', () => {
+      log('ready-to-show -> show');
+      win.show();
+      // откроем DevTools для наглядности
+      try { win.webContents.openDevTools({ mode: 'detach' }); } catch {}
+    });
+
+    win.on('closed', () => {
+      log('window closed');
+      win = null;
+    });
+
+    // Наконец загрузка
+    win.loadURL(fileUrl);
+  } catch (e) {
+    log('FATAL createWindow error:', e);
+    dialog.showErrorBox('FATAL', String(e?.stack || e));
+  }
+}
+
+// macOS: НЕ выходим при закрытии всех окон
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    log('window-all-closed -> quit');
+    app.quit();
+  } else {
+    log('window-all-closed on darwin (не выходим)');
+  }
+});
+
+app.whenReady().then(() => {
+  log('app ready');
+  createWindow();
+
+  app.on('activate', () => {
+    log('activate');
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
+
+// На всякий случай
+app.on('will-quit', () => log('will-quit'));
+app.on('quit', () => log('quit'));

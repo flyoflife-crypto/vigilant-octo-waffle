@@ -1,0 +1,190 @@
+const { app, BrowserWindow, protocol, ipcMain, dialog } = require("electron");
+const path = require("path");
+const fs = require("fs");
+const { pathToFileURL } = require("url");
+
+const OUT_DIR = path.join(__dirname, "..", "out");
+
+// Маппим file:///_next/*, /fonts/*, /images/* и т.п. в out/*
+function interceptStatic() {
+  protocol.interceptFileProtocol("file", (request, callback) => {
+    try {
+      const raw = decodeURI(request.url).replace(/^file:\/\//, "");
+      if (
+        raw.startsWith("/_next/") ||
+        raw.startsWith("/fonts/") ||
+        raw.startsWith("/images/") ||
+        /^\/(favicon|icon|apple|manifest)/.test(raw)
+      ) {
+        return callback({ path: path.join(OUT_DIR, raw) });
+      }
+      if (path.isAbsolute(raw)) return callback({ path: raw });
+      return callback({ path: raw });
+    } catch (e) {
+      console.error("[intercept error]", e);
+      callback({ path: request.url.replace(/^file:\/\//, "") });
+    }
+  });
+}
+
+function createWindow() {
+  const win = new BrowserWindow({
+    width: 1440,
+    height: 900,
+    webPreferences: { preload: path.join(__dirname, "preload.js") },
+  });
+  const indexPath = path.join(OUT_DIR, "index.html");
+  const fileUrl = pathToFileURL(indexPath).toString();
+  console.log("[MAIN] loadURL:", fileUrl);
+  win.loadURL(fileUrl);
+  return win;
+}
+
+// === Полноразмерный PNG ===
+
+function buildMenu() {
+  const template = [
+    {
+      label: "File",
+      submenu: [
+        {
+          label: "Export Full Page PNG…",
+          accelerator: "CommandOrControl+Shift+P",
+          click: (_, focusedWindow) => captureFullPage(focusedWindow),
+        },
+        { type: "separator" },
+        { role: "close" },
+      ],
+    },
+    { role: "editMenu" },
+    { role: "viewMenu" },
+    { role: "windowMenu" },
+  ];
+  const menu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(menu);
+}
+
+app.whenReady().then(() => {
+  interceptStatic();
+  const win = createWindow();
+  buildMenu();
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+    }
+  });
+});
+
+app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
+
+app.whenReady().then(()=>{
+  const {BrowserWindow}=require("electron");
+  const {ipcMain}=require("electron");
+  ipcMain.handle("export-fullpage-png",async(e)=>{
+    const win=BrowserWindow.fromWebContents(e.sender);
+    await captureFullPagePNG(win);
+  });
+});
+
+
+
+async function captureFullPage(targetWin){
+  if(!targetWin) return;
+  const wc = targetWin.webContents;
+
+  // === соберём инфу о реальном скроллере на странице ===
+  const info = await wc.executeJavaScript(`(() => {
+    function pickScroller(){
+      const cand = [
+        document.scrollingElement,
+        document.querySelector('main'),
+        document.querySelector('#__next'),
+        document.body,
+        document.documentElement,
+      ].filter(Boolean);
+      const extra = Array.from(document.querySelectorAll('*'))
+        .filter(el => el.scrollHeight > el.clientHeight + 5);
+      const all = Array.from(new Set([...cand, ...extra]));
+      return all.find(el => el.scrollHeight > el.clientHeight + 5)
+          || document.scrollingElement || document.documentElement;
+    }
+    function cssPath(el){
+      if (!el) return null;
+      if (el===document.documentElement) return 'html';
+      if (el===document.body) return 'body';
+      if (el.id) return '#' + CSS.escape(el.id);
+      let segs=[], cur=el;
+      while (cur && cur.nodeType===1 && segs.length<4 && cur!==document.body && cur!==document.documentElement){
+        let sel = cur.nodeName.toLowerCase();
+        if (cur.classList.length) sel += '.'+Array.from(cur.classList).slice(0,2).map(CSS.escape).join('.');
+        segs.unshift(sel); cur=cur.parentElement;
+      }
+      return segs.join(' > ') || 'body';
+    }
+    const scroller = pickScroller();
+    const totalWidth  = scroller.scrollWidth;
+    const totalHeight = scroller.scrollHeight;
+    const viewportWidth  = scroller.clientWidth;
+    const viewportHeight = scroller.clientHeight;
+    const dpr = window.devicePixelRatio || 1;
+    return {
+      selector: cssPath(scroller),
+      startX: scroller.scrollLeft,
+      startY: scroller.scrollTop,
+      totalWidth, totalHeight, viewportWidth, viewportHeight, dpr
+    };
+  })()`, true);
+
+  const {selector,startX,startY,totalWidth,totalHeight,viewportWidth,viewportHeight,dpr} = info;
+
+  // динамический импорт ESM-библиотеки
+  const { default: Jimp } = await import('jimp');
+
+  const xSteps = Math.max(1, Math.ceil(totalWidth  / viewportWidth));
+  const ySteps = Math.max(1, Math.ceil(totalHeight / viewportHeight));
+  const outW = Math.round(totalWidth  * dpr);
+  const outH = Math.round(totalHeight * dpr);
+  const canvas = await new Jimp(outW, outH, 0x00000000);
+
+  const PAUSE = 200; // чуть больше, чтобы точно прорисовалось
+
+  for (let yi=0; yi<ySteps; yi++){
+    for (let xi=0; xi<xSteps; xi++){
+      const x = xi*viewportWidth;
+      const y = yi*viewportHeight;
+
+      await wc.executeJavaScript(`(() => {
+        const s = document.querySelector(${JSON.stringify(selector)}) || document.scrollingElement || document.documentElement;
+        s.scrollTo({ left: ${x}, top: ${y}, behavior: "instant" });
+      })()`);
+      await new Promise(r=>setTimeout(r, PAUSE));
+
+      const img = await wc.capturePage();               // PNG буфер текущего тайла
+      let shot = await Jimp.read(img.toPNG());
+
+      const pasteW = Math.round(Math.min(viewportWidth,  totalWidth  - x) * dpr);
+      const pasteH = Math.round(Math.min(viewportHeight, totalHeight - y) * dpr);
+      if (shot.getWidth() !== pasteW || shot.getHeight() !== pasteH){
+        shot.crop(0, 0, Math.min(shot.getWidth(), pasteW), Math.min(shot.getHeight(), pasteH));
+      }
+      await canvas.composite(shot, Math.round(x*dpr), Math.round(y*dpr));
+    }
+  }
+
+  // вернуть исходный скролл
+  await wc.executeJavaScript(`(() => {
+    const s = document.querySelector(${JSON.stringify(selector)}) || document.scrollingElement || document.documentElement;
+    s.scrollTo({ left: ${startX}, top: ${startY}, behavior: "instant" });
+  })()`);
+
+  const { dialog } = require('electron');
+  const { canceled, filePath } = await dialog.showSaveDialog(targetWin, {
+    title: "Save PNG",
+    defaultPath: `onepager-${new Date().toISOString().split("T")[0]}.png`,
+    filters: [{ name:"PNG Image", extensions:["png"] }]
+  });
+  if (!canceled && filePath){
+    const buf = await canvas.getBufferAsync(Jimp.MIME_PNG);
+    require('fs').writeFileSync(filePath, buf);
+  }
+}

@@ -1,0 +1,72 @@
+
+// @ts-check
+const { app, BrowserWindow, protocol } = require('electron');
+const path = require('path');
+const { pathToFileURL } = require('url');
+
+const OUT_DIR = path.join(__dirname, '..', 'out');
+
+function registerInterceptors() {
+  // // protocol.interceptFileProtocol('file', (request, callback) => {
+    try {
+      const u = new URL(request.url);
+      const raw = decodeURIComponent(u.pathname || '/');
+
+      // index.html из out/
+      if (raw === '/' || raw === '/index.html') {
+        return callback({ path: path.join(OUT_DIR, 'index.html') });
+      }
+      // ассеты Next.js
+      if (raw.startsWith('/_next/')) {
+        return callback({ path: path.join(OUT_DIR, raw) });
+      }
+      // попробуем отдать файл из out/ как есть
+      const candidate = path.join(OUT_DIR, raw.replace(/^\/+/, ''));
+      return callback({ path: candidate });
+    } catch (e) {
+      console.error('[MAIN] intercept error:', e);
+      return callback({ path: path.join(OUT_DIR, 'index.html') });
+    }
+  });
+  console.log('[MAIN] protocol intercept for file:// set');
+}
+
+function createWindow() {
+  const win = new BrowserWindow({
+    width: 1280,
+    height: 800,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      sandbox: true,
+    },
+  });
+
+  const indexPath = path.join(OUT_DIR, 'index.html');
+  const fileUrl = pathToFileURL(indexPath).toString();
+
+  console.log('[MAIN] loadURL:', fileUrl);
+  win.{
+  const p = require('path');
+  const indexPath = p.join(process.cwd(), 'out', 'index.html');
+  mainWindow.loadFile(indexPath);
+}
+  // подробный лог навигации/загрузки
+  win.webContents.on('will-navigate', (e,url)=>console.log('[MAIN] will-navigate ->', url));
+  win.webContents.on('did-start-loading', ()=>console.log('[MAIN] did-start-loading'));
+  win.webContents.on('did-finish-load', ()=>console.log('[MAIN] did-finish-load'));
+  win.webContents.on('did-fail-load', (e,code,desc,url)=>console.error('[MAIN] did-fail-load', {code,desc,url}));
+}
+
+app.whenReady().then(() => {
+  registerInterceptors();
+  createWindow();
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit();
+});
