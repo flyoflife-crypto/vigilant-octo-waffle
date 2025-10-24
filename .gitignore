@@ -1,3 +1,10 @@
-mars-onepager-final.zip
+# Ignore build artifacts
+node_modules/
 .DS_Store
-.DS_Store
+.next/
+out/
+dist/
+release/
+*.log
+.vscode/
+
