@@ -1,10 +1,20 @@
-# Ignore build artifacts
+# Dependencies / caches
 node_modules/
 .DS_Store
+.vscode/
+*.log
+
+# Next/Electron build artifacts
 .next/
 out/
 dist/
 release/
-*.log
-.vscode/
+electron/out/
 
+# Desktop bundles / binaries
+*.app
+*.dmg
+*.exe
+*.zip
+*.asar
+*.node
