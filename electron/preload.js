@@ -1,7 +1,5 @@
 const { contextBridge, ipcRenderer } = require("electron");
-console.log("[PRELOAD] ready");
 
-contextBridge.exposeInMainWorld('native', {
-  exportFullPagePNG: () => ipcRenderer.invoke('export-fullpage-png')
+contextBridge.exposeInMainWorld("api", {
+  exportFullpagePNG: () => ipcRenderer.invoke("export-fullpage-png"),
 });
-console.log('[PRELOAD] ready');

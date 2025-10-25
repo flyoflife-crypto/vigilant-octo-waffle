@@ -25,9 +25,24 @@ function EditableSpan({
     }
   };
   const safe: string = (value ?? '').toString();
+  function focusRowInput(idx: number): void {
+  const el = document.querySelector<HTMLInputElement>(`input[data-row-index=""], [data-focus="row-"]`);
+  if (el) { el.focus(); (el as HTMLInputElement).select?.(); }
+}
+
+  function focusBarInput(actualIdx: number) {
+    const el = document.querySelector<HTMLElement>(`[data-bar-label="${actualIdx}"]`);
+    el?.focus();
+  }
+
+  function focusMsInput(msIdx: number) {
+    const el = document.querySelector<HTMLElement>(`[data-ms-label="${msIdx}"]`);
+    el?.focus();
+  }
+
+
   return (
-    <span
-      contentEditable
+    <span tabIndex={0} contentEditable
       suppressContentEditableWarning
       onKeyDown={onKeyDown}
       onBlur={(e: React.FocusEvent<HTMLSpanElement>) =>
@@ -117,11 +132,20 @@ function removeRowAtIndex(data:any, onChange:(d:any)=>void, idx:number) {
 /** prompt-редактор, возвращает строку или null */
 function promptEditText(title: string, initial: string = ""): string | null {
   try {
-    // eslint-disable-next-line no-alert
-    const next = window.prompt(title, initial ?? "");
-    return next == null ? null : String(next);
+    const g: any = (globalThis as any);
+    const p = g && typeof g.prompt === "function" ? g.prompt : null;
+    if (p) {
+      const res = p(title, initial);
+      return res == null ? null : String(res);
+    }
+    return null;
   } catch { return null; }
 }
+
+
+
+
+
 
 
 interface GanttChartProps {
@@ -336,7 +360,7 @@ return () => document.removeEventListener("click", handleClick)
     const base = "Row";
     const used = new Set((data.rows ?? []).map((r) => String(r)));
     const suggested = `${base} ${idx + 1}`;
-    const fromPrompt = typeof window !== 'undefined' ? window.prompt("Enter row name:", suggested) : null;
+    const fromPrompt = null;
     let name = (fromPrompt ?? '').trim();
     if (!name) {
       let i = idx + 1;
@@ -366,7 +390,7 @@ return () => document.removeEventListener("click", handleClick)
     const base = "Row";
     const used = new Set((data.rows ?? []).map((r) => String(r)));
     const suggested = `${base} ${idx + 2}`;
-    const fromPrompt = typeof window !== 'undefined' ? window.prompt("Enter row name:", suggested) : null;
+    const fromPrompt = null;
     let name = (fromPrompt ?? '').trim();
     if (!name) {
       let i = idx + 2;
@@ -489,10 +513,7 @@ return () => document.removeEventListener("click", handleClick)
             <div
               key={i}
               className="flex-1 text-center text-xs py-2 hover:bg-gray-50 cursor-pointer min-w-[60px]"
-              onDoubleClick={() => {
-                const newLabel = prompt("Edit label:", typeof label === "string" ? label : label.top)
-                if (newLabel) editTickLabel(i, newLabel)
-              }}
+              onDoubleClick={() => {}}
               onContextMenu={(e) =>
                 handleContextMenu(e, [
                   { label: "Add column right", action: () => {} },
@@ -501,8 +522,11 @@ return () => document.removeEventListener("click", handleClick)
               }
             >
               {typeof label === "string" ? (
-                label
-              ) : (
+    <EditableSpan
+      value={typeof label === "string" ? label : String(label)}
+      onCommit={(t) => editTickLabel(i, t)}
+    />
+  ) : (
                 <div className="flex flex-col">
                   <div className="font-semibold text-[10px]">
                     {/* editable top label */}
@@ -565,10 +589,7 @@ return () => document.removeEventListener("click", handleClick)
                       <Edit2 className="w-4 h-4" /> Rename row
                     </span>
                   ),
-                  action: () => {
-                    const newLabel = prompt("Edit row name:", rowName)
-                    if (newLabel) editRowLabel(rowIdx, newLabel)
-                  },
+                  action: () => {},
                 },
                 {
                   label: (
@@ -601,13 +622,9 @@ return () => document.removeEventListener("click", handleClick)
             {/* Row label */}
             <div
               className="w-[120px] flex-shrink-0 px-2 py-3 text-sm font-semibold flex items-center cursor-pointer"
-              onDoubleClick={() => {
-                const newLabel = prompt("Edit row name:", rowName)
-                if (newLabel) editRowLabel(rowIdx, newLabel)
-              }}
+              onDoubleClick={() => {}}
             >
-              {/* inline editable row */}<span
-  contentEditable
+              {/* inline editable row */}<span tabIndex={0} contentEditable
   suppressContentEditableWarning
   className={editableClass}
   onKeyDown={onEditableKeyDown}
@@ -676,10 +693,7 @@ return () => document.removeEventListener("click", handleClick)
                           setSelectedBar(actualIdx)
                         }
                       }}
-                      onDoubleClick={() => {
-                        const newLabel = prompt("Edit bar label:", bar.label)
-                        if (newLabel) editBarLabel(actualIdx, newLabel)
-                      }}
+                      onDoubleClick={() => {}}
                       onContextMenu={(e) =>
                         handleContextMenu(e, [
                           {
@@ -715,10 +729,7 @@ return () => document.removeEventListener("click", handleClick)
                                 <Edit2 className="w-4 h-4" /> Edit label
                               </span>
                             ),
-                            action: () => {
-                              const newLabel = prompt("Edit bar label:", bar.label)
-                              if (newLabel) editBarLabel(actualIdx, newLabel)
-                            },
+                            action: () => {},
                           },
                           {
                             label: (
@@ -745,7 +756,7 @@ return () => document.removeEventListener("click", handleClick)
                           })
                         }}
                       />
-                      <span className="truncate">
+                      <span className="truncate" data-bar-label={actualIdx} tabIndex={0}>
                         {/* editable bar label */}
                         <EditableSpan
                           value={bar.label ?? ""}
@@ -829,10 +840,7 @@ return () => document.removeEventListener("click", handleClick)
                     setSelectedMs(msIdx)
                   }
                 }}
-                onDoubleClick={() => {
-                  const newLabel = prompt("Edit milestone:", ms.label)
-                  if (newLabel) editMsLabel(msIdx, newLabel)
-                }}
+                onDoubleClick={() => {}}
                 onContextMenu={(e) =>
                   handleContextMenu(e, [
                     {
@@ -841,10 +849,7 @@ return () => document.removeEventListener("click", handleClick)
                           <Edit2 className="w-4 h-4" /> Edit label
                         </span>
                       ),
-                      action: () => {
-                        const newLabel = prompt("Edit milestone:", ms.label)
-                        if (newLabel) editMsLabel(msIdx, newLabel)
-                      },
+                      action: () => {},
                     },
                     {
                       label: (
