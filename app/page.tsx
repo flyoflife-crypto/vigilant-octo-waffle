@@ -14,6 +14,8 @@ import { ProjectManager } from "@/components/mars/project-manager"
 import { useToast } from "@/hooks/use-toast"
 import { sanitizeHTML } from "@/lib/sanitize"
 import type { OnePagerData, GanttData } from "@/types/onepager"
+import { exportFullPagePng } from '@/lib/png';
+import MarkdownHotkeys from "@/components/global/MarkdownHotkeys";
 import {
   getAllProjects,
   getActiveProjectId,
@@ -59,19 +61,17 @@ const weekToPeriod = (weekIndex: number) => Math.min(13, Math.floor(weekIndex / 
 export default function OnePagerPage() {
   const { toast } = useToast()
 
-  const handleExportPNG = useCallback(() => {
-  try {
-    const p = (window as any).native?.exportFullPagePNG?.();
-    Promise.resolve(p).then(() => {
+  const handleExportPNG = useCallback(async () => {
+    try {
+      await exportFullPagePng('#onepagerRoot', 'onepager.png', { saveAs: true });
       setTimeout(() => {
         toast({ title: "Exported to PNG", description: "Full page PNG saved" });
       }, 250);
-    });
-  } catch (e) {
-    console.error(e);
-    toast({ variant: "destructive", title: "PNG export failed" });
-  }
-}, [toast]);
+    } catch (e) {
+      console.error(e);
+      toast({ variant: "destructive", title: "PNG export failed" });
+    }
+  }, [toast]);
   const searchParams = useSearchParams()
   const isPresentationMode = searchParams.get("presentation") === "true"
   const [currentProject, setCurrentProject] = useState<Project | null>(null)
@@ -225,27 +225,6 @@ export default function OnePagerPage() {
   const handleCreateNew = useCallback(
     (name: string) => {
       const newProject = createNewProject(name)
-
-  // Hotkey: Cmd/Ctrl + 4 — экспорт полноразмерного PNG
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === '4') {
-        e.preventDefault();
-        try {
-          const p = (window as any).native?.exportFullPagePNG?.();
-          Promise.resolve(p).then(() => {
-            setTimeout(() => {
-              toast({ title: "Exported to PNG", description: "Full page PNG saved" });
-            }, 250);
-          });
-        } catch {
-          toast({ variant: "destructive", title: "PNG export failed" });
-        }
-      }
-    };
-    window.addEventListener('keydown', onKey);
-
-  }, [toast]);
       saveProject(newProject)
       setCurrentProject(newProject)
       setData(newProject.data)
@@ -387,6 +366,20 @@ export default function OnePagerPage() {
       const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0
       const modifier = isMac ? e.metaKey : e.ctrlKey
 
+      // Export PNG quick: Ctrl/Cmd+4
+      if (modifier && e.key === "4" && !e.shiftKey) {
+        e.preventDefault();
+        exportFullPagePng('#onepagerRoot', 'onepager.png');
+        return;
+      }
+
+      // Export PNG Save As…: Ctrl/Cmd+Shift+4
+      if (modifier && e.key === "4" && e.shiftKey) {
+        e.preventDefault();
+        exportFullPagePng('#onepagerRoot', 'onepager.png', { saveAs: true });
+        return;
+      }
+
       // Undo: Ctrl+Z / Cmd+Z
       if (modifier && e.key === "z" && !e.shiftKey) {
         e.preventDefault()
@@ -452,7 +445,8 @@ export default function OnePagerPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div id="onepagerRoot" className="min-h-screen bg-gray-50">
+      <MarkdownHotkeys />
       {!isPresentationMode && (
         <div
           className="fixed top-0 left-0 right-0 z-50 print:hidden"

@@ -2,6 +2,26 @@
 
 import type React from "react"
 
+// === SAFE SELECTION HELPERS (auto-injected) ===
+function __fallbackRange(): Range {
+  const r = document.createRange();
+  const root = (document.body || document.documentElement);
+  // если в корне нет текстовых узлов, схлопываем в root
+  try { r.setStart(root, 0); } catch { }
+  try { r.collapse(true); } catch { }
+  return r;
+}
+function safeGetRange(): Range {
+  const sel = (typeof window !== 'undefined' && window.getSelection) ? window.getSelection() : null;
+  if (!sel || sel.rangeCount === 0) return __fallbackRange();
+  try { return /*SAFE*/(safeGetRangeFrom(sel)); } catch { return __fallbackRange(); }
+}
+function safeGetRangeFrom(sel: Selection | null): Range {
+  if (!sel || sel.rangeCount === 0) return __fallbackRange();
+  try { return /*SAFE*/(safeGetRangeFrom(sel)); } catch { return __fallbackRange(); }
+}
+// === END SAFE SELECTION HELPERS ===
+
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -179,7 +199,7 @@ export function RisksArtifacts({ data, setData }: RisksArtifactsProps) {
         break
     }
 
-    const range = selection.getRangeAt(0)
+    const range = /*SAFE*/(safeGetRangeFrom(selection))
     const startOffset = range.startOffset
     const endOffset = range.endOffset
 
