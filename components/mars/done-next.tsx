@@ -2,6 +2,26 @@
 
 import type React from "react"
 
+// === SAFE SELECTION HELPERS (auto-injected) ===
+function __fallbackRange(): Range {
+  const r = document.createRange();
+  const root = (document.body || document.documentElement);
+  // если в корне нет текстовых узлов, схлопываем в root
+  try { r.setStart(root, 0); } catch { }
+  try { r.collapse(true); } catch { }
+  return r;
+}
+function safeGetRange(): Range {
+  const sel = (typeof window !== 'undefined' && window.getSelection) ? window.getSelection() : null;
+  if (!sel || sel.rangeCount === 0) return __fallbackRange();
+  try { return /*SAFE*/(safeGetRangeFrom(sel)); } catch { return __fallbackRange(); }
+}
+function safeGetRangeFrom(sel: Selection | null): Range {
+  if (!sel || sel.rangeCount === 0) return __fallbackRange();
+  try { return /*SAFE*/(safeGetRangeFrom(sel)); } catch { return __fallbackRange(); }
+}
+// === END SAFE SELECTION HELPERS ===
+
 import { useState } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -101,7 +121,7 @@ export function DoneNext({ data, setData }: DoneNextProps) {
 
     const items = formatMenu.type === "done" ? data.done : data.next
     const currentValue = items[formatMenu.index]
-    const range = selection.getRangeAt(0)
+    const range = /*SAFE*/(safeGetRangeFrom(selection))
     const startOffset = range.startOffset
     const endOffset = range.endOffset
 
