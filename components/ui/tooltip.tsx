@@ -2,71 +2,102 @@
 
 import * as React from 'react'
 import { createPortal } from 'react-dom'
+import { Slot } from '@radix-ui/react-slot'
 
 import { cn } from '@/lib/utils'
-
-type TooltipProviderContextValue = {
-  delayDuration: number
-}
-
-const TooltipProviderContext = React.createContext<TooltipProviderContextValue>({
-  delayDuration: 0,
-})
-
-type TooltipProviderProps = React.PropsWithChildren<{
-  delayDuration?: number
-}>
-
-function TooltipProvider({ delayDuration = 0, children }: TooltipProviderProps) {
-  const value = React.useMemo(
-    () => ({ delayDuration }),
-    [delayDuration],
-  )
-
-  return (
-    <TooltipProviderContext.Provider value={value}>
-      {children}
-    </TooltipProviderContext.Provider>
-  )
-}
 
 type TooltipContextValue = {
   open: boolean
   setOpen: (open: boolean) => void
-  triggerRef: React.MutableRefObject<HTMLElement | null>
   delayDuration: number
-  contentId: string
+  closeDelay: number
+  triggerRef: React.MutableRefObject<HTMLElement | null>
+  timerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>
+  id: string
 }
 
+type TooltipSettings = {
+  delayDuration: number
+}
+
+const CLOSE_DELAY = 100
+
+const TooltipSettingsContext = React.createContext<TooltipSettings>({ delayDuration: 200 })
 const TooltipContext = React.createContext<TooltipContextValue | null>(null)
 
-function useTooltipContext(component: string) {
+function useTooltipSettings() {
+  return React.useContext(TooltipSettingsContext)
+}
+
+function useTooltipContext(name: string) {
   const context = React.useContext(TooltipContext)
   if (!context) {
-    throw new Error(`${component} must be used within a <Tooltip> component.`)
+    throw new Error(`${name} must be used within a <Tooltip> component`)
   }
   return context
 }
 
-type TooltipProps = React.PropsWithChildren<{
+function composeEventHandlers<E extends Event | React.SyntheticEvent>(
+  theirHandler: ((event: E) => void) | undefined,
+  ourHandler: (event: E) => void,
+) {
+  return (event: E) => {
+    theirHandler?.(event)
+    if (!('defaultPrevented' in event) || !event.defaultPrevented) {
+      ourHandler(event)
+    }
+  }
+}
+
+function assignRef<T>(ref: React.Ref<T | null> | undefined, value: T | null) {
+  if (typeof ref === 'function') {
+    ref(value)
+  } else if (ref) {
+    ;(ref as React.MutableRefObject<T | null>).current = value
+  }
+}
+
+function useMergedRefs<T>(...refs: Array<React.Ref<T | null> | undefined>) {
+  return React.useCallback(
+    (value: T | null) => {
+      for (const ref of refs) assignRef(ref, value)
+    },
+    refs,
+  )
+}
+
+type TooltipProviderProps = {
+  children: React.ReactNode
+  delayDuration?: number
+}
+
+function TooltipProvider({ children, delayDuration = 200 }: TooltipProviderProps) {
+  const value = React.useMemo(() => ({ delayDuration }), [delayDuration])
+  return <TooltipSettingsContext.Provider value={value}>{children}</TooltipSettingsContext.Provider>
+}
+
+type TooltipProps = {
+  children: React.ReactNode
+  delayDuration?: number
   defaultOpen?: boolean
   open?: boolean
   onOpenChange?: (open: boolean) => void
-}>
+}
 
 function Tooltip({
   children,
-  defaultOpen = false,
+  delayDuration,
+  defaultOpen,
   open: openProp,
   onOpenChange,
 }: TooltipProps) {
-  const { delayDuration } = React.useContext(TooltipProviderContext)
-  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen)
-  const triggerRef = React.useRef<HTMLElement | null>(null)
-  const contentId = React.useId()
-
+  const settings = useTooltipSettings()
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState<boolean>(defaultOpen ?? false)
   const isControlled = openProp !== undefined
   const open = isControlled ? Boolean(openProp) : uncontrolledOpen
+  const triggerRef = React.useRef<HTMLElement | null>(null)
+  const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  const id = React.useId()
 
   const setOpen = React.useCallback(
     (next: boolean) => {
@@ -78,389 +109,212 @@ function Tooltip({
     [isControlled, onOpenChange],
   )
 
-  const value = React.useMemo<TooltipContextValue>(
+  const contextValue = React.useMemo<TooltipContextValue>(
     () => ({
       open,
       setOpen,
+      delayDuration: delayDuration ?? settings.delayDuration,
+      closeDelay: CLOSE_DELAY,
       triggerRef,
-      delayDuration,
-      contentId,
+      timerRef,
+      id,
     }),
-    [open, setOpen, delayDuration, contentId],
+    [open, setOpen, delayDuration, settings.delayDuration, triggerRef, timerRef, id],
   )
 
-  return (
-    <TooltipContext.Provider value={value}>{children}</TooltipContext.Provider>
-  )
+  return <TooltipContext.Provider value={contextValue}>{children}</TooltipContext.Provider>
 }
 
-type TooltipTriggerProps = {
+type TooltipTriggerProps = React.ComponentPropsWithoutRef<'button'> & {
   asChild?: boolean
-} & React.HTMLAttributes<HTMLElement>
+}
 
-const TooltipTrigger = React.forwardRef<HTMLElement, TooltipTriggerProps>(
-  (
-    {
-      asChild = false,
-      children,
-      onMouseEnter,
-      onMouseLeave,
-      onFocus,
-      onBlur,
-      onKeyDown,
-      ...rest
-    },
-    forwardedRef,
-  ) => {
-    const { open, setOpen, triggerRef, delayDuration, contentId } = useTooltipContext(
-      'TooltipTrigger',
-    )
-    const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+const TooltipTrigger = React.forwardRef<HTMLElement, TooltipTriggerProps>(function TooltipTrigger(
+  { asChild = false, onMouseEnter, onMouseLeave, onFocus, onBlur, onKeyDown, ...props },
+  forwardedRef,
+) {
+  const context = useTooltipContext('TooltipTrigger')
 
-    const clearTimer = React.useCallback(() => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current)
-        timerRef.current = null
-      }
-    }, [])
-
-    const setRefs = React.useCallback(
-      (node: HTMLElement | null) => {
-        triggerRef.current = node
-        if (typeof forwardedRef === 'function') {
-          forwardedRef(node)
-        } else if (forwardedRef) {
-          ;(forwardedRef as React.MutableRefObject<HTMLElement | null>).current = node
-        }
-      },
-      [forwardedRef, triggerRef],
-    )
-
-    const openWithDelay = React.useCallback(() => {
-      clearTimer()
-      if (delayDuration > 0) {
-        timerRef.current = setTimeout(() => setOpen(true), delayDuration)
-      } else {
-        setOpen(true)
-      }
-    }, [clearTimer, delayDuration, setOpen])
-
-    const closeTooltip = React.useCallback(() => {
-      clearTimer()
-      setOpen(false)
-    }, [clearTimer, setOpen])
-
-    React.useEffect(() => closeTooltip, [closeTooltip])
-
-    const composedMouseEnter = React.useCallback<React.MouseEventHandler<HTMLElement>>(
-      (event) => {
-        onMouseEnter?.(event)
-        if (!event.defaultPrevented) {
-          openWithDelay()
-        }
-      },
-      [onMouseEnter, openWithDelay],
-    )
-
-    const composedMouseLeave = React.useCallback<React.MouseEventHandler<HTMLElement>>(
-      (event) => {
-        onMouseLeave?.(event)
-        if (!event.defaultPrevented) {
-          closeTooltip()
-        }
-      },
-      [closeTooltip, onMouseLeave],
-    )
-
-    const composedFocus = React.useCallback<React.FocusEventHandler<HTMLElement>>(
-      (event) => {
-        onFocus?.(event)
-        if (!event.defaultPrevented) {
-          setOpen(true)
-        }
-      },
-      [onFocus, setOpen],
-    )
-
-    const composedBlur = React.useCallback<React.FocusEventHandler<HTMLElement>>(
-      (event) => {
-        onBlur?.(event)
-        if (!event.defaultPrevented) {
-          closeTooltip()
-        }
-      },
-      [closeTooltip, onBlur],
-    )
-
-    const composedKeyDown = React.useCallback<React.KeyboardEventHandler<HTMLElement>>(
-      (event) => {
-        onKeyDown?.(event)
-        if (!event.defaultPrevented && event.key === 'Escape') {
-          closeTooltip()
-        }
-      },
-      [closeTooltip, onKeyDown],
-    )
-
-    const triggerProps: React.HTMLAttributes<HTMLElement> & { ['data-state']?: string } = {
-      ...rest,
-      onMouseEnter: composedMouseEnter,
-      onMouseLeave: composedMouseLeave,
-      onFocus: composedFocus,
-      onBlur: composedBlur,
-      onKeyDown: composedKeyDown,
-      'aria-describedby': open ? contentId : undefined,
-      'data-state': open ? 'open' : 'closed',
+  const clearTimer = React.useCallback(() => {
+    if (context.timerRef.current) {
+      clearTimeout(context.timerRef.current)
+      context.timerRef.current = null
     }
+  }, [context])
 
-    if (asChild) {
-      if (!React.isValidElement(children)) {
-        throw new Error('TooltipTrigger with `asChild` expects a single React element child.')
-      }
+  const openWithDelay = React.useCallback(() => {
+    clearTimer()
+    context.timerRef.current = setTimeout(() => {
+      context.setOpen(true)
+    }, context.delayDuration)
+  }, [clearTimer, context])
 
-      const childElement = children as React.ReactElement & {
-        ref?: React.Ref<HTMLElement>
-      }
+  const closeWithDelay = React.useCallback(() => {
+    clearTimer()
+    context.timerRef.current = setTimeout(() => {
+      context.setOpen(false)
+    }, context.closeDelay)
+  }, [clearTimer, context])
 
-      const childProps = {
-        ...childElement.props,
-        ...triggerProps,
-      }
+  const Comp = asChild ? Slot : 'button'
+  const ref = useMergedRefs<HTMLElement>(forwardedRef, (node) => {
+    context.triggerRef.current = node
+  })
 
-      if (childElement.ref) {
-        const existingRef = childElement.ref as React.Ref<HTMLElement>
-        childProps.ref = (node: HTMLElement | null) => {
-          setRefs(node)
-          if (typeof existingRef === 'function') {
-            existingRef(node)
-          } else if (existingRef) {
-            ;(existingRef as React.MutableRefObject<HTMLElement | null>).current = node
-          }
+  return (
+    <Comp
+      data-slot="tooltip-trigger"
+      data-state={context.open ? 'open' : 'closed'}
+      aria-describedby={context.open ? context.id : undefined}
+      type={asChild ? undefined : 'button'}
+      onMouseEnter={composeEventHandlers(onMouseEnter, openWithDelay)}
+      onMouseLeave={composeEventHandlers(onMouseLeave, closeWithDelay)}
+      onFocus={composeEventHandlers(onFocus, () => context.setOpen(true))}
+      onBlur={composeEventHandlers(onBlur, () => context.setOpen(false))}
+      onKeyDown={composeEventHandlers(onKeyDown, (event: React.KeyboardEvent) => {
+        if (event.key === 'Escape') {
+          context.setOpen(false)
         }
-      } else {
-        childProps.ref = setRefs
-      }
+      })}
+      ref={ref}
+      {...props}
+    />
+  )
+})
 
-      return React.cloneElement(childElement, childProps)
-    }
+const ALIGNMENTS = ['start', 'center', 'end'] as const
+const SIDES = ['top', 'bottom', 'left', 'right'] as const
 
-    return React.createElement('button', { type: 'button', ref: setRefs, ...triggerProps }, children)
-  },
-)
+type TooltipSide = (typeof SIDES)[number]
+type TooltipAlign = (typeof ALIGNMENTS)[number]
 
-TooltipTrigger.displayName = 'TooltipTrigger'
-
-type TooltipContentProps = React.HTMLAttributes<HTMLDivElement> & {
-  side?: 'top' | 'bottom' | 'left' | 'right'
-  align?: 'start' | 'center' | 'end'
+type TooltipContentProps = React.ComponentPropsWithoutRef<'div'> & {
+  side?: TooltipSide
+  align?: TooltipAlign
   sideOffset?: number
+  alignOffset?: number
   hidden?: boolean
 }
 
-function getContentPosition(
-  rect: DOMRect,
-  side: TooltipContentProps['side'],
-  align: TooltipContentProps['align'],
-  sideOffset: number,
-) {
-  const scrollX = window.scrollX ?? window.pageXOffset
-  const scrollY = window.scrollY ?? window.pageYOffset
-  const alignment = align ?? 'center'
-  const positionSide = side ?? 'top'
-
-  const base = {
-    top: rect.top + scrollY,
-    bottom: rect.bottom + scrollY,
-    left: rect.left + scrollX,
-    right: rect.right + scrollX,
-    centerX: rect.left + rect.width / 2 + scrollX,
-    centerY: rect.top + rect.height / 2 + scrollY,
-  }
-
-  switch (positionSide) {
-    case 'bottom': {
-      if (alignment === 'start') {
-        return {
-          top: base.bottom,
-          left: base.left,
-          transform: `translate(0, ${sideOffset}px)`,
-        }
-      }
-      if (alignment === 'end') {
-        return {
-          top: base.bottom,
-          left: base.right,
-          transform: `translate(-100%, ${sideOffset}px)`,
-        }
-      }
-      return {
-        top: base.bottom,
-        left: base.centerX,
-        transform: `translate(-50%, ${sideOffset}px)`,
-      }
-    }
-    case 'left': {
-      if (alignment === 'start') {
-        return {
-          top: base.top,
-          left: base.left,
-          transform: `translate(calc(-100% - ${sideOffset}px), 0)`,
-        }
-      }
-      if (alignment === 'end') {
-        return {
-          top: base.bottom,
-          left: base.left,
-          transform: `translate(calc(-100% - ${sideOffset}px), -100%)`,
-        }
-      }
-      return {
-        top: base.centerY,
-        left: base.left,
-        transform: `translate(calc(-100% - ${sideOffset}px), -50%)`,
-      }
-    }
-    case 'right': {
-      if (alignment === 'start') {
-        return {
-          top: base.top,
-          left: base.right,
-          transform: `translate(${sideOffset}px, 0)`,
-        }
-      }
-      if (alignment === 'end') {
-        return {
-          top: base.bottom,
-          left: base.right,
-          transform: `translate(${sideOffset}px, -100%)`,
-        }
-      }
-      return {
-        top: base.centerY,
-        left: base.right,
-        transform: `translate(${sideOffset}px, -50%)`,
-      }
-    }
-    default: {
-      if (alignment === 'start') {
-        return {
-          top: base.top,
-          left: base.left,
-          transform: `translate(0, calc(-100% - ${sideOffset}px))`,
-        }
-      }
-      if (alignment === 'end') {
-        return {
-          top: base.top,
-          left: base.right,
-          transform: `translate(-100%, calc(-100% - ${sideOffset}px))`,
-        }
-      }
-      return {
-        top: base.top,
-        left: base.centerX,
-        transform: `translate(-50%, calc(-100% - ${sideOffset}px))`,
-      }
-    }
-  }
-}
-
-function getArrowStyle(side: TooltipContentProps['side']) {
-  switch (side) {
-    case 'bottom':
-      return { top: -4, left: '50%', transform: 'translate(-50%, -50%) rotate(45deg)' }
-    case 'left':
-      return { right: -4, top: '50%', transform: 'translate(50%, -50%) rotate(45deg)' }
-    case 'right':
-      return { left: -4, top: '50%', transform: 'translate(-50%, -50%) rotate(45deg)' }
-    default:
-      return { bottom: -4, left: '50%', transform: 'translate(-50%, 50%) rotate(45deg)' }
-  }
-}
-
-const TooltipContent = React.forwardRef<HTMLDivElement, TooltipContentProps>(
-  (
-    {
-      className,
-      side = 'top',
-      align = 'center',
-      sideOffset = 0,
-      hidden,
-      children,
-      style,
-      ...rest
-    },
-    forwardedRef,
-  ) => {
-    const { open, triggerRef, contentId } = useTooltipContext('TooltipContent')
-    const [mounted, setMounted] = React.useState(false)
-    const contentRef = React.useRef<HTMLDivElement | null>(null)
-
-    React.useEffect(() => {
-      setMounted(true)
-    }, [])
-
-    const setRefs = React.useCallback(
-      (node: HTMLDivElement | null) => {
-        contentRef.current = node
-        if (typeof forwardedRef === 'function') {
-          forwardedRef(node)
-        } else if (forwardedRef) {
-          ;(forwardedRef as React.MutableRefObject<HTMLDivElement | null>).current = node
-        }
-      },
-      [forwardedRef],
-    )
-
-    if (!mounted || !open || hidden) {
-      return null
-    }
-
-    if (typeof document === 'undefined') {
-      return null
-    }
-
-    const trigger = triggerRef.current
-    if (!trigger) {
-      return null
-    }
-
-    const rect = trigger.getBoundingClientRect()
-    const position = getContentPosition(rect, side, align, sideOffset)
-    const arrowStyle = getArrowStyle(side)
-
-    const content = (
-      <div
-        ref={setRefs}
-        id={contentId}
-        role="tooltip"
-        data-slot="tooltip-content"
-        data-state={open ? 'open' : 'closed'}
-        className={cn(
-          'bg-foreground text-background animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50 w-fit rounded-md px-3 py-1.5 text-xs text-balance shadow-lg',
-          className,
-        )}
-        style={{
-          position: 'absolute',
-          pointerEvents: 'none',
-          ...position,
-          ...style,
-        }}
-        {...rest}
-      >
-        {children}
-        <span
-          data-slot="tooltip-arrow"
-          className="pointer-events-none absolute z-50 block h-2.5 w-2.5 rounded-[2px] bg-foreground"
-          style={arrowStyle}
-        />
-      </div>
-    )
-
-    return createPortal(content, document.body)
+const TooltipContent = React.forwardRef<HTMLDivElement, TooltipContentProps>(function TooltipContent(
+  {
+    className,
+    children,
+    side = 'top',
+    align = 'center',
+    sideOffset = 8,
+    alignOffset = 0,
+    hidden,
+    style,
+    onKeyDown,
+    ...props
   },
-)
+  forwardedRef,
+) {
+  const context = useTooltipContext('TooltipContent')
+  const [mounted, setMounted] = React.useState(false)
+  const [position, setPosition] = React.useState<{ top: number; left: number }>({ top: -9999, left: -9999 })
+  const contentRef = React.useRef<HTMLDivElement | null>(null)
 
-TooltipContent.displayName = 'TooltipContent'
+  const updatePosition = React.useCallback(() => {
+    const trigger = context.triggerRef.current
+    const content = contentRef.current
+    if (!trigger || !content) return
+
+    const triggerRect = trigger.getBoundingClientRect()
+    const contentRect = content.getBoundingClientRect()
+    let top = triggerRect.top + window.scrollY
+    let left = triggerRect.left + window.scrollX
+
+    if (side === 'top') {
+      top -= contentRect.height + sideOffset
+    } else if (side === 'bottom') {
+      top += triggerRect.height + sideOffset
+    } else if (side === 'left') {
+      left -= contentRect.width + sideOffset
+    } else if (side === 'right') {
+      left += triggerRect.width + sideOffset
+    }
+
+    if (side === 'top' || side === 'bottom') {
+      if (align === 'start') {
+        left += alignOffset
+      } else if (align === 'end') {
+        left += triggerRect.width - contentRect.width + alignOffset
+      } else {
+        left += (triggerRect.width - contentRect.width) / 2 + alignOffset
+      }
+    } else {
+      if (align === 'start') {
+        top += alignOffset
+      } else if (align === 'end') {
+        top += triggerRect.height - contentRect.height + alignOffset
+      } else {
+        top += (triggerRect.height - contentRect.height) / 2 + alignOffset
+      }
+    }
+
+    setPosition({ top, left })
+  }, [context.triggerRef, side, align, sideOffset, alignOffset])
+
+  React.useEffect(() => {
+    setMounted(true)
+    return () => setMounted(false)
+  }, [])
+
+  React.useLayoutEffect(() => {
+    if (!context.open || hidden) return
+    updatePosition()
+  }, [context.open, hidden, updatePosition])
+
+  React.useEffect(() => {
+    if (!context.open || hidden) return
+    const handle = () => updatePosition()
+    window.addEventListener('resize', handle)
+    window.addEventListener('scroll', handle, true)
+    return () => {
+      window.removeEventListener('resize', handle)
+      window.removeEventListener('scroll', handle, true)
+    }
+  }, [context.open, hidden, updatePosition])
+
+  const composedRef = useMergedRefs<HTMLDivElement>(forwardedRef, (node) => {
+    contentRef.current = node
+  })
+
+  if (!mounted || hidden || !context.open) {
+    return null
+  }
+
+  if (typeof document === 'undefined') {
+    return null
+  }
+
+  return createPortal(
+    <div
+      data-slot="tooltip-content"
+      data-state={context.open ? 'open' : 'closed'}
+      data-side={side}
+      data-align={align}
+      ref={composedRef}
+      id={context.id}
+      role="tooltip"
+      style={{ position: 'fixed', top: position.top, left: position.left, ...style }}
+      className={cn(
+        'bg-foreground text-background animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50 w-fit rounded-md px-3 py-1.5 text-xs text-balance shadow-sm',
+        className,
+      )}
+      onKeyDown={composeEventHandlers(onKeyDown, (event: React.KeyboardEvent<HTMLDivElement>) => {
+        if (event.key === 'Escape') {
+          context.setOpen(false)
+        }
+      })}
+      {...props}
+    >
+      {children}
+    </div>,
+    document.body,
+  )
+})
 
 export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider }
