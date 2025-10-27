@@ -7,7 +7,7 @@
     "dev": "next dev",
     "lint": "next lint",
     "start": "next start",
-    "build:web": "next build && next export -o out",
+    "build:web": "next build && next export --output out",
     "dist:clean": "rm -rf dist .next out || true",
     "dist:mac": "npm run build:web && electron-builder --mac zip",
     "dist:mac-dir": "npm run build:web && electron-builder --mac dir",
