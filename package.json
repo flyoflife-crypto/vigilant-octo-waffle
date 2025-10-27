@@ -5,11 +5,9 @@
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",
-    "build:web": "next build && next export -o out",
+    "build:web": "next build",
     "dev:electron": "concurrently -k -n WEB,ELEC -c blue,magenta \"next dev -p 3000\" \"wait-on http://localhost:3000 && electron ./electron/main.js\"",
-    "build:electron:win": "npx electron-builder --win nsis zip",
-    "lint": "next lint",
-    "start": "next start"
+    "build:electron:win": "npx electron-builder --win nsis zip"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -71,19 +69,19 @@
     "zod": "3.25.76"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4.1.9",
     "@types/node": "^22",
     "@types/react": "^18",
     "@types/react-dom": "^18",
-    "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
-    "electron": "^30.5.1",
-    "electron-builder": "^26.0.12",
-    "postcss": "^8.5",
-    "tailwindcss": "^4.1.9",
     "tw-animate-css": "1.3.3",
     "typescript": "^5",
-    "wait-on": "^9.0.1"
+    "electron": "^30.5.1",
+    "electron-builder": "^26.0.12",
+    "concurrently": "^9.2.1",
+    "wait-on": "^9.0.1",
+    "tailwindcss": "^4.1.9",
+    "@tailwindcss/postcss": "^4.1.9",
+    "postcss": "^8.5"
   },
   "main": "electron/main.js",
   "build": {
