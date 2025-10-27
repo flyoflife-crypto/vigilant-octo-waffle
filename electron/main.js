@@ -5,6 +5,15 @@ const { fileURLToPath, pathToFileURL } = require("url");
 
 let mainWindow;
 
+function getDevServerURL() {
+  return (
+    process.env.ELECTRON_START_URL ||
+    process.env.ELECTRON_DEV_SERVER_URL ||
+    process.env.ELECTRON_RENDERER_URL ||
+    process.env.ELECTRON_WEBPACK_WDS_PORT && `http://localhost:${process.env.ELECTRON_WEBPACK_WDS_PORT}`
+  );
+}
+
 function getOutDir() {
   const devOut = path.join(__dirname, "..", "out");
   return fs.existsSync(devOut) ? devOut : path.join(process.resourcesPath || path.join(__dirname, ".."), "out");
@@ -24,10 +33,27 @@ function createWindow() {
   });
 
   const outDir = getOutDir();
-  const indexUrl = pathToFileURL(path.join(outDir, "index.html")).toString();
-  console.log("[MAIN] try loadURL:", indexUrl);
+  const indexPath = path.join(outDir, "index.html");
+  const devServerUrl = getDevServerURL();
+  const shouldUseDevServer = Boolean(devServerUrl && !app.isPackaged);
+  let targetUrl;
 
-  mainWindow.loadURL(indexUrl).catch((e) => {
+  if (shouldUseDevServer) {
+    targetUrl = devServerUrl;
+  } else if (fs.existsSync(indexPath)) {
+    targetUrl = pathToFileURL(indexPath).toString();
+  } else {
+    console.warn("[MAIN] index.html not found at", indexPath, "- falling back to dev server or error page");
+    if (devServerUrl) {
+      targetUrl = devServerUrl;
+    } else {
+      targetUrl = "data:text/html,<!doctype html><h1>No build found</h1><p>Please run npm run build:web</p>";
+    }
+  }
+
+  console.log("[MAIN] try loadURL:", targetUrl);
+
+  mainWindow.loadURL(targetUrl).catch((e) => {
     console.error("[MAIN] loadURL error", e);
   });
 

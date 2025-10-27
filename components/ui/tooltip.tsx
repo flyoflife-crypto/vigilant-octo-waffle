@@ -13,6 +13,7 @@ type TooltipContextValue = {
 }
 
 const TooltipContext = React.createContext<TooltipContextValue | null>(null)
+const TooltipDelayContext = React.createContext<number | undefined>(undefined)
 
 function useTooltipContext(component: string) {
   const context = React.useContext(TooltipContext)
@@ -32,7 +33,7 @@ type TooltipProps = {
 
 function Tooltip({
   children,
-  delayDuration = 200,
+  delayDuration: delayDurationProp = 200,
   defaultOpen = false,
   open: openProp,
   onOpenChange,
@@ -41,6 +42,9 @@ function Tooltip({
   const isControlled = openProp !== undefined
   const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen)
   const open = isControlled ? Boolean(openProp) : uncontrolledOpen
+  const providerDelayDuration = React.useContext(TooltipDelayContext)
+  const delayDuration =
+    providerDelayDuration !== undefined ? providerDelayDuration : delayDurationProp
 
   const setOpen = React.useCallback(
     (next: boolean) => {
@@ -64,14 +68,28 @@ function Tooltip({
 
 type TooltipProviderProps = {
   children: React.ReactNode
+  delayDuration?: number
 }
 
-function TooltipProvider({ children }: TooltipProviderProps) {
-  return <>{children}</>
+function TooltipProvider({ children, delayDuration }: TooltipProviderProps) {
+  return (
+    <TooltipDelayContext.Provider value={delayDuration}>
+      {children}
+    </TooltipDelayContext.Provider>
+  )
 }
 
-type TooltipTriggerProps = React.ComponentPropsWithoutRef<'button'> & {
+type TooltipTriggerProps = Omit<
+  React.ComponentPropsWithoutRef<'button'>,
+  'onMouseEnter' | 'onMouseLeave' | 'onFocus' | 'onBlur' | 'onTouchStart' | 'onTouchEnd'
+> & {
   asChild?: boolean
+  onMouseEnter?: (event: React.MouseEvent<HTMLElement>) => void
+  onMouseLeave?: (event: React.MouseEvent<HTMLElement>) => void
+  onFocus?: (event: React.FocusEvent<HTMLElement>) => void
+  onBlur?: (event: React.FocusEvent<HTMLElement>) => void
+  onTouchStart?: (event: React.TouchEvent<HTMLElement>) => void
+  onTouchEnd?: (event: React.TouchEvent<HTMLElement>) => void
 }
 
 const TooltipTrigger = React.forwardRef<HTMLElement, TooltipTriggerProps>(
