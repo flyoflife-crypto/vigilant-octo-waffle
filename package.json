@@ -1,48 +1,82 @@
 {
+  "name": "mars-onepager",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mars One-Pager — Next.js + Electron (статический экспорт + офлайн)",
+  "author": "Saveliy",
+  "license": "MIT",
+  "main": "electron/main.js",
   "scripts": {
-    "dev": "next dev",
-    "clean": "rimraf .next out dist release",
-    "build:web": "next build",
-    "start": "next start",
+    "dev": "next dev -p 3000",
+    "dev:electron": "concurrently -k -n WEB,ELEC -c blue,magenta \"next dev -p 3000\" \"wait-on http://localhost:3000 && electron ./electron/main.js\"",
+    "build": "next build",
+    "build:web": "rimraf .next out && next build && node -e \"const fs=require('fs'); if(!fs.existsSync('out')) fs.mkdirSync('out'); fs.writeFileSync('out/index.txt','export placeholder (Next 14 app dir pre-renders to .next, мы кладем out из CI)')\"",
+    "start": "next start -p 3000",
     "dist:mac": "npm run build:web && electron-builder --mac zip",
     "dist:win": "npm run build:web && electron-builder --win nsis portable",
-    "dist:linux": "npm run build:web && electron-builder --linux AppImage zip"
+    "dist:clean": "rimraf dist .next out release || true"
+  },
+  "dependencies": {
+    "next": "14.2.3",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "html-to-image": "1.11.11",
+    "lucide-react": "0.454.0",
+    "clsx": "2.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "20.11.30",
+    "@types/react": "18.2.67",
+    "@types/react-dom": "18.2.22",
+    "autoprefixer": "10.4.19",
+    "concurrently": "8.2.2",
+    "electron": "30.5.1",
+    "electron-builder": "26.0.12",
+    "postcss": "8.4.38",
+    "rimraf": "5.0.10",
+    "tailwindcss": "3.4.12",
+    "typescript": "5.4.5",
+    "wait-on": "8.0.5"
   },
   "build": {
     "appId": "com.mars.onepager",
     "productName": "Mars One-Pager",
     "asar": true,
+    "directories": {
+      "output": "dist"
+    },
     "files": [
-      "electron/**",
-      "out/**",
-      "app/**",
-      "components/**",
-      "public/**",
-      "styles/**",
-      "lib/**",
-      "next.config.js",
-      "package.json"
+      "electron/**/*",
+      "package.json",
+      "!**/*.map",
+      "!**/.DS_Store",
+      "!**/._*",
+      "!**/*.log",
+      "!**/release/**",
+      "!**/dist/**",
+      "!**/out/**"
     ],
     "extraResources": [
       {
         "from": "out",
-        "to": "out"
+        "to": "out",
+        "filter": ["**/*"]
       }
     ],
     "mac": {
-      "target": ["zip"],
-      "icon": "electron/icon.icns"
+      "target": ["zip"]
     },
     "win": {
-      "target": ["nsis", "zip"],
-      "icon": "electron/icon.ico",
-      "artifactName": "${productName}-${version}-win-${arch}.${ext}"
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ]
     },
-    "linux": {
-      "target": ["AppImage", "zip"]
-    },
-    "directories": {
-      "output": "dist"
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": false
     }
   }
 }
