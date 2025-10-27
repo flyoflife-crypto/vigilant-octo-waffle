@@ -1,0 +1,41 @@
+.DS_Store
+Thumbs.db
+
+node_modules/
+.next/
+.turbo/
+.cache/
+coverage/
+out/
+dist/
+
+# Logs
+*.log
+npm-debug.log*
+yarn*.log
+pnpm-debug.log*
+
+# Temp / Backups
+*.tmp
+*.bak*
+*.backup
+*.old
+*.save
+*.copy
+*~
+*.orig
+*.rej
+*.swp
+*.swo
+_backup_*/
+
+# TypeScript / ESLint cache
+*.tsbuildinfo
+.eslintcache
+
+# Editors
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
