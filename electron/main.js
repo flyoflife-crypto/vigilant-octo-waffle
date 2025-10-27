@@ -1,53 +1,56 @@
-const { app, BrowserWindow, shell } = require('electron');
-const path = require('path');
-const isDev = !app.isPackaged;
+const { app, BrowserWindow, shell } = require('electron')
+const path = require('path')
+const url = require('url')
 
-function getOutIndexFile() {
-  // путь до out/index.html внутри установленного приложения
-  const base = app.isPackaged ? process.resourcesPath : __dirname + '/../';
-  return path.join(base, 'out', 'index.html');
-}
+let win
 
-function createWindow() {
-  const win = new BrowserWindow({
-    width: 1200,
+function createWindow () {
+  win = new BrowserWindow({
+    width: 1280,
     height: 800,
-    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-      nodeIntegration: false,
       contextIsolation: true,
-      sandbox: true,
+      nodeIntegration: false,
+      sandbox: true
     },
-  });
+    show: false
+  })
 
-  win.once('ready-to-show', () => win.show());
+  win.once('ready-to-show', () => win.show())
 
-  if (isDev) {
-    // в дев-режиме можно открывать локальный сервер, если хочется
-    const fileUrl = 'file://' + getOutIndexFile().replace(/\\/g, '/');
-    win.loadURL(fileUrl);
-    win.webContents.openDevTools({ mode: 'detach' });
+  const resourcesRoot = app.isPackaged
+    ? process.resourcesPath
+    : path.resolve(process.cwd())
+
+  // В prod ожидаем out/ лежит в extraResources
+  const outIndex = path.join(resourcesRoot, 'out', 'index.html')
+
+  // В dev — просто открываем dev-сервер
+  if (!app.isPackaged) {
+    const devURL = 'http://localhost:3000'
+    console.log('[MAIN] dev loadURL:', devURL)
+    win.loadURL(devURL)
   } else {
-    const fileUrl = 'file://' + getOutIndexFile().replace(/\\/g, '/');
-    win.loadURL(fileUrl);
+    const indexURL = url.pathToFileURL(outIndex).toString()
+    console.log('[MAIN] prod loadURL:', indexURL)
+    win.loadURL(indexURL)
   }
 
-  // внешние ссылки — в системном браузере
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
-    return { action: 'deny' };
-  });
+  win.webContents.setWindowOpenHandler(({ url: target }) => {
+    shell.openExternal(target)
+    return { action: 'deny' }
+  })
+
+  win.on('closed', () => { win = null })
 }
 
-app.whenReady().then(() => {
-  createWindow();
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
-});
+app.whenReady().then(createWindow)
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
-});
+  if (process.platform !== 'darwin') app.quit()
+})
+
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) createWindow()
+})
