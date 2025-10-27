@@ -1,14 +1,17 @@
-// lib/exporters/png.ts
+// lib/png.ts
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import * as htmlToImage from 'html-to-image';
 
-type ExportResult = { ok: true; blob: Blob } | { ok: false; error: string };
+type ExportResult =
+  | { ok: true; blob: Blob; path?: string | null; canceled?: boolean }
+  | { ok: false; error: string; canceled?: boolean };
 
 function waitFontsAndImages(root: HTMLElement | Document = document): Promise<void> {
   const fontsReady = (document as any).fonts?.ready ?? Promise.resolve();
   const imgs = Array.from((root instanceof Document ? root : root.ownerDocument!).images || []);
-  const imgPromises = imgs.map(img => {
+  const imgPromises = imgs.map((img) => {
     if ((img as any).complete && (img as any).naturalWidth) return Promise.resolve();
-    return new Promise<void>(res => {
+    return new Promise<void>((res) => {
       img.addEventListener('load', () => res(), { once: true });
       img.addEventListener('error', () => res(), { once: true }); // не блокируем на ошибках
     });
@@ -16,13 +19,72 @@ function waitFontsAndImages(root: HTMLElement | Document = document): Promise<vo
   return Promise.all([fontsReady, ...imgPromises]).then(() => undefined);
 }
 
+function fmtDate(d = new Date()) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function triggerDownload(blob: Blob, fileName: string) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    URL.revokeObjectURL(a.href);
+    a.remove();
+  }, 0);
+}
+
+function blobToImage(blob: Blob): Promise<HTMLImageElement> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(img);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(img);
+    };
+    img.src = url;
+  });
+}
+
+async function saveWithPicker(blob: Blob, suggestedName: string) {
+  const handle = await (window as any).showSaveFilePicker({
+    suggestedName,
+    types: [{ description: 'PNG Image', accept: { 'image/png': ['.png'] } }],
+    excludeAcceptAllOption: false,
+  });
+  const stream = await handle.createWritable();
+  await stream.write(blob);
+  await stream.close();
+}
+
+async function tryElectronSave(dataUrl: string, suggestedName: string) {
+  const el = (window as any)?.electron;
+  if (!el || typeof el.savePng !== 'function') return { used: false as const };
+  try {
+    const res = await el.savePng(dataUrl, suggestedName);
+    return { used: true as const, res };
+  } catch (e: any) {
+    console.error('[PNG] Electron save failed, fallback to browser:', e);
+    return { used: true as const, res: { ok: false, error: String(e?.message || e) } };
+  }
+}
+
 /**
  * Пытается снять «цельный» PNG с указанного контейнера.
- * Если страница очень длинная (> ~16–20k px), использует фолбэк «тайлинг» (склейку).
+ * Если страница очень длинная, использует фолбэк «тайлинг» (склейку).
+ * В браузере: загрузка файла. В Electron: системный диалог сохранения.
  */
 export async function exportFullPagePng(
   rootSelector = '#onepagerRoot',
-  fileName = 'onepager.png',
+  fileName = `mars-onepager-${fmtDate()}.png`,
   opts: { saveAs?: boolean } = {}
 ): Promise<ExportResult> {
   const root = document.querySelector<HTMLElement>(rootSelector) ?? document.body;
@@ -57,9 +119,9 @@ export async function exportFullPagePng(
 
     await waitFontsAndImages(root);
 
-    // Пытаемся сделать один большой снимок
     const MAX_SAFE = 28000; // браузерные лимиты canvas по высоте; держим запас
     if (height <= MAX_SAFE) {
+      // один большой снимок
       const dataUrl = await htmlToImage.toPng(root, {
         pixelRatio: window.devicePixelRatio || 1,
         width,
@@ -67,20 +129,33 @@ export async function exportFullPagePng(
         style: { transform: 'none' }, // на всякий случай убираем масштаб
         skipFonts: false,
         cacheBust: true,
+        backgroundColor: '#ffffff',
       });
+
+      // Electron-путь: просим main сохранить через диалог
+      const elSave = await tryElectronSave(dataUrl, fileName);
+      if (elSave.used) {
+        if (elSave.res?.ok) {
+          // вернём также blob для унификации
+          const blob = await (await fetch(dataUrl)).blob();
+          return { ok: true, blob, path: elSave.res.path || null, canceled: !!elSave.res.canceled };
+        }
+        if (elSave.res?.canceled) return { ok: false, error: 'User canceled', canceled: true };
+        // если Electron попытка была, но не удалась — упадём на браузерный фолбэк ниже
+      }
+
       const blob = await (await fetch(dataUrl)).blob();
       if (opts.saveAs && 'showSaveFilePicker' in window) {
         await saveWithPicker(blob, fileName);
       } else {
         triggerDownload(blob, fileName);
       }
-      return { ok: true, blob };
+      return { ok: true, blob, path: null };
     }
 
-    // Фолбэк: тайлинг (склейка кусками по вьюпорту)
+    // Фолбэк: тайлинг (склейка кусками)
     const res = await exportByTiling(root, width, height, fileName, opts);
     return res;
-
   } catch (e: any) {
     return { ok: false, error: String(e?.message || e) };
   } finally {
@@ -90,18 +165,6 @@ export async function exportFullPagePng(
     root.style.width = prev.rootWidth;
     root.style.height = prev.rootHeight;
   }
-}
-
-function triggerDownload(blob: Blob, fileName: string) {
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => {
-    URL.revokeObjectURL(a.href);
-    a.remove();
-  }, 0);
 }
 
 /**
@@ -127,6 +190,7 @@ async function exportByTiling(
       style: { transform: `translateY(-${top}px)` },
       skipFonts: false,
       cacheBust: true,
+      backgroundColor: '#ffffff',
     });
     tiles.push(await (await fetch(dataUrl)).blob());
   }
@@ -139,7 +203,7 @@ async function exportByTiling(
 
   for (const tile of tiles) {
     const img = await blobToImage(tile);
-    await new Promise(res => {
+    await new Promise((res) => {
       if (img.complete) return res(null);
       img.onload = () => res(null);
       img.onerror = () => res(null);
@@ -148,32 +212,25 @@ async function exportByTiling(
     y += img.height;
   }
 
-  const finalBlob: Blob = await new Promise<Blob>(res => canvas.toBlob(b => res(b!), 'image/png'));
-  if (opts.saveAs && 'showSaveFilePicker' in window) {
-    await saveWithPicker(finalBlob, fileName);
-  } else {
-    triggerDownload(finalBlob, fileName);
+  // готовим результат
+  const dataUrl = canvas.toDataURL('image/png');
+  const blob: Blob = await (await fetch(dataUrl)).blob();
+
+  // Electron-путь
+  const elSave = await tryElectronSave(dataUrl, fileName);
+  if (elSave.used) {
+    if (elSave.res?.ok) return { ok: true, blob, path: elSave.res.path || null, canceled: false };
+    if (elSave.res?.canceled) return { ok: false, error: 'User canceled', canceled: true };
+    // если попытка была, но неуспешна — падаем в браузерный путь ниже
   }
-  return { ok: true, blob: finalBlob };
+
+  if (opts.saveAs && 'showSaveFilePicker' in window) {
+    await saveWithPicker(blob, fileName);
+  } else {
+    triggerDownload(blob, fileName);
+  }
+  return { ok: true, blob, path: null };
 }
 
-function blobToImage(blob: Blob): Promise<HTMLImageElement> {
-  return new Promise((resolve) => {
-    const url = URL.createObjectURL(blob);
-    const img = new Image();
-    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
-    img.onerror = () => { URL.revokeObjectURL(url); resolve(img); };
-    img.src = url;
-  });
-}
-
-async function saveWithPicker(blob: Blob, suggestedName: string) {
-  const handle = await (window as any).showSaveFilePicker({
-    suggestedName,
-    types: [{ description: 'PNG Image', accept: { 'image/png': ['.png'] } }],
-    excludeAcceptAllOption: false,
-  });
-  const stream = await handle.createWritable();
-  await stream.write(blob);
-  await stream.close();
-}
+// Совместимость: альтернативное имя
+export const saveFullPagePng = exportFullPagePng;

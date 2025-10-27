@@ -8,8 +8,12 @@
     "lint": "next lint",
     "start": "next start",
     "build:web": "next build && next export -o out",
+    "dist:clean": "rm -rf dist .next out || true",
     "dist:mac": "npm run build:web && electron-builder --mac zip",
     "dist:mac-dir": "npm run build:web && electron-builder --mac dir",
+    "dist:win": "npm run build:web && electron-builder --win portable zip",
+    "dist:linux": "npm run build:web && electron-builder --linux AppImage deb",
+    "dist:all": "npm run build:web && electron-builder -mwl",
     "dev:electron": "npm run build:web && ELECTRON_ENABLE_LOGGING=1 ELECTRON_ENABLE_STACK_DUMPING=1 electron .",
     "start:electron": "ELECTRON_ENABLE_LOGGING=1 ELECTRON_ENABLE_STACK_DUMPING=1 npx electron ./electron/main.js"
   },
@@ -41,7 +45,6 @@
     "@radix-ui/react-toast": "1.2.4",
     "@radix-ui/react-toggle": "1.1.1",
     "@radix-ui/react-toggle-group": "1.1.1",
-    "@radix-ui/react-tooltip": "1.1.6",
     "@vercel/analytics": "latest",
     "autoprefixer": "^10.4.20",
     "class-variance-authority": "^0.7.1",
@@ -97,17 +100,19 @@
       "out/**/*",
       "package.json"
     ],
+    "asar": true,
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
     "mac": {
-      "target": [
-        "dir",
-        "zip"
-      ]
+      "target": ["dir", "zip"]
     },
     "win": {
-      "target": [
-        "portable",
-        "zip"
-      ]
+      "target": ["portable", "zip"]
+    },
+    "linux": {
+      "target": ["AppImage", "deb"]
     }
   }
 }
