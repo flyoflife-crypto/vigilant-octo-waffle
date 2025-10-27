@@ -1,4 +1,4 @@
-name: Build and Release Windows
+name: Build Windows (Electron + Next export)
 
 permissions:
   contents: write
@@ -12,12 +12,11 @@ on:
         default: ''
   push:
     tags:
-      - 'v*'
+      - 'v*'   # release on tag push vX.Y.Z
 
 jobs:
   build-win:
     runs-on: windows-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,7 +24,7 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.inputs.ref || github.ref }}
 
-      - name: Enable long paths (Windows git)
+      - name: Enable long paths (git for Windows)
         run: git config --global core.longpaths true
 
       - name: Setup Node.js
@@ -39,28 +38,23 @@ jobs:
           node -v
           npm -v
 
-      - name: Install dependencies (ci with fallback)
+      - name: Install dependencies (ci -> fallback to install)
         shell: pwsh
         run: |
           if (Test-Path package-lock.json) {
-            try {
-              npm ci --no-audit --no-fund
-              exit 0
-            } catch {
-              Write-Host "npm ci failed, falling back to npm install"
-            }
+            try { npm ci --no-audit --no-fund; exit 0 } catch { Write-Host "npm ci failed, falling back to npm i" }
           }
           npm install --no-audit --no-fund
 
-      - name: Build Next.js (static)
+      - name: Build Next.js (static export)
         run: npm run build:web
 
-      - name: Build Electron (Windows)
+      - name: Build Electron (Windows NSIS + ZIP)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx electron-builder --win nsis portable
+        run: npm run build:electron:win
 
-      - name: Upload artifacts
+      - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-artifacts
@@ -68,3 +62,21 @@ jobs:
             dist/**
             !dist/mac/**
             !dist/linux/**
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build-win
+    runs-on: windows-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-artifacts
+          path: dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/**
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

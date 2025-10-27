@@ -3,19 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "dev": "next dev -p 3000",
     "build": "next build",
-    "dev": "next dev",
+    "build:web": "next build && next export -o out",
+    "dev:electron": "concurrently -k -n WEB,ELEC -c blue,magenta \"next dev -p 3000\" \"wait-on http://localhost:3000 && electron ./electron/main.js\"",
+    "build:electron:win": "npx electron-builder --win nsis zip",
     "lint": "next lint",
-    "start": "next start",
-    "build:web": "rm -rf out && next build",
-    "dist:clean": "rm -rf dist .next out || true",
-    "dist:mac": "npm run build:web && electron-builder --mac zip",
-    "dist:mac-dir": "npm run build:web && electron-builder --mac dir",
-    "dist:win": "npm run build:web && electron-builder --win portable zip",
-    "dist:linux": "npm run build:web && electron-builder --linux AppImage deb",
-    "dist:all": "npm run build:web && electron-builder -mwl",
-    "dev:electron": "npm run build:web && ELECTRON_ENABLE_LOGGING=1 ELECTRON_ENABLE_STACK_DUMPING=1 electron .",
-    "start:electron": "ELECTRON_ENABLE_LOGGING=1 ELECTRON_ENABLE_STACK_DUMPING=1 npx electron ./electron/main.js"
+    "start": "next start"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -94,25 +88,28 @@
   "main": "electron/main.js",
   "build": {
     "appId": "com.mars.onepager",
-    "productName": "Mars One-Pager",
+    "productName": "Mars Onepager",
+    "directories": {
+      "output": "dist"
+    },
     "files": [
-      "electron/**/*",
-      "out/**/*",
+      "out/**",
+      "electron/main.js",
+      "electron/preload.js",
       "package.json"
     ],
-    "asar": true,
-    "directories": {
-      "output": "dist",
-      "buildResources": "build"
-    },
-    "mac": {
-      "target": ["dir", "zip"]
-    },
+    "extraResources": [],
     "win": {
-      "target": ["portable", "zip"]
+      "target": [
+        "nsis",
+        "zip"
+      ],
+      "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
     },
-    "linux": {
-      "target": ["AppImage", "deb"]
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false
     }
   }
 }

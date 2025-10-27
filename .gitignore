@@ -8,6 +8,8 @@ node_modules/
 coverage/
 out/
 dist/
+release/
+return/
 
 # Logs
 *.log
