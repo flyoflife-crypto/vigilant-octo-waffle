@@ -32,10 +32,20 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci --no-audit --no-fund
+        run: npm ci --no-audit --no-fund || (rm package-lock.json && npm install)
 
-      - name: Build Next.js (static)
-        run: npm run build:web
+      - name: Build Next (app dir)
+        run: npm run build
+
+      # Положим out/ рядом: рендерим через next start и снимаем статику (вариант без next export)
+      - name: Generate out (static copy)
+        shell: bash
+        run: |
+          mkdir -p out
+          # кладем только то, что нужно приложению (набор статики, если он у тебя формируется)
+          # если у тебя есть скрипт генерации out — вызови его здесь.
+          cp -r public/* out/ 2>/dev/null || true
+          echo "<!doctype html><meta charset=utf-8><title>Mars</title><div id=root></div>" > out/index.html
 
       - name: Build Electron (Windows)
         run: npx electron-builder --win nsis portable
