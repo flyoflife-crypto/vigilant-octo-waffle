@@ -1,4 +1,4 @@
-name: Build and Release Windows
+name: Build Windows
 
 permissions:
   contents: write
@@ -11,8 +11,8 @@ on:
         required: false
         default: ''
   push:
-    tags:
-      - 'v*'
+    branches:
+      - stable/clean-base
 
 jobs:
   build-win:
@@ -25,7 +25,7 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.inputs.ref || github.ref }}
 
-      - name: Enable long paths (Windows git)
+      - name: Enable long paths (git for Windows)
         run: git config --global core.longpaths true
 
       - name: Setup Node.js
@@ -34,31 +34,18 @@ jobs:
           node-version: 20
           cache: 'npm'
 
-      - name: Print versions
-        run: |
-          node -v
-          npm -v
+      - name: Install dependencies (no lockfile required)
+        run: npm install --no-audit --no-fund --legacy-peer-deps
 
-      - name: Install dependencies (ci with fallback)
-        shell: pwsh
-        run: |
-          if (Test-Path package-lock.json) {
-            try {
-              npm ci --no-audit --no-fund
-              exit 0
-            } catch {
-              Write-Host "npm ci failed, falling back to npm install"
-            }
-          }
-          npm install --no-audit --no-fund
-
-      - name: Build Next.js (static)
+      - name: Build web (Next export)
         run: npm run build:web
 
-      - name: Build Electron (Windows)
+      - name: Package Windows (Electron)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx electron-builder --win nsis portable
+          ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+          ELECTRON_BUILDER_BINARIES_MIRROR: https://npmmirror.com/mirrors/electron-builder-binaries/
+        run: npx electron-builder --win nsis zip
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
