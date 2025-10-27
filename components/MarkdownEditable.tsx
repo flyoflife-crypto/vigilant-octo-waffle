@@ -18,6 +18,7 @@ type Props = {
  */
 export default function MarkdownEditable({ value, onChange, className, placeholder }: Props) {
   const taRef = useRef<HTMLTextAreaElement | null>(null)
+  const [mode, setMode] = useState<'edit' | 'preview'>('edit')
   const [text, setText] = useState<string>(value ?? '')
   const selStartRef = useRef<number>(0)
   const selEndRef = useRef<number>(0)
