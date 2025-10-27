@@ -1,10 +1,14 @@
 /** @type {import('next').NextConfig} */
-const nextConfig = {
-  output: 'export',               // генерируем статический out/
-  reactStrictMode: true,
-  images: { unoptimized: true },  // для статической сборки
-  // НИЧЕГО не трогаем с assetPrefix для geist/font,
-  // иначе словим ошибку "assetPrefix must start with / or http"
-};
+const isProd = process.env.NODE_ENV === 'production'
 
-module.exports = nextConfig;
+const nextConfig = {
+  reactStrictMode: true,
+  trailingSlash: true,
+  output: undefined, // не используем 'export' для app router
+  assetPrefix: isProd ? '' : '',
+  images: {
+    unoptimized: true
+  }
+}
+
+module.exports = nextConfig
