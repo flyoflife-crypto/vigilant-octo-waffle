@@ -1,0 +1,21 @@
+# build / cache
+.next/
+out/
+dist/
+release/
+node_modules/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-lock.yaml
+package-lock.json
+
+# electron-builder caches
+$LOCALAPPDATA/electron-builder/
+electron-builder.yml
+dist/builder-effective-config.yaml
+
+# OS
+.DS_Store
+Thumbs.db
