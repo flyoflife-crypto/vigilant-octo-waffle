@@ -25,22 +25,6 @@ function EditableSpan({
     }
   };
   const safe: string = (value ?? '').toString();
-  function focusRowInput(idx: number): void {
-  const el = document.querySelector<HTMLInputElement>(`input[data-row-index=""], [data-focus="row-"]`);
-  if (el) { el.focus(); (el as HTMLInputElement).select?.(); }
-}
-
-  function focusBarInput(actualIdx: number) {
-    const el = document.querySelector<HTMLElement>(`[data-bar-label="${actualIdx}"]`);
-    el?.focus();
-  }
-
-  function focusMsInput(msIdx: number) {
-    const el = document.querySelector<HTMLElement>(`[data-ms-label="${msIdx}"]`);
-    el?.focus();
-  }
-
-
   return (
     <span tabIndex={0} contentEditable
       suppressContentEditableWarning
@@ -457,9 +441,43 @@ return () => document.removeEventListener("click", handleClick)
     onChange({ ...data, labels: newLabels })
   }
 
-  const containerWidth = useMemo(() => {
-    return containerRef.current?.offsetWidth || 0
-  }, [containerRef.current?.offsetWidth])
+  const [containerWidth, setContainerWidth] = useState(0);
+  const [rowHeight, setRowHeight] = useState(48);
+  const [rowHeights, setRowHeights] = useState<number[]>([]);
+  const [rowTops, setRowTops] = useState<number[]>([]); // centers of each row from top of container
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const measure = () => {
+      if (!containerRef.current) return;
+      setContainerWidth(containerRef.current.offsetWidth);
+      const rows = Array.from(containerRef.current.querySelectorAll('[data-row]')) as HTMLElement[];
+      if (rows.length) {
+        const heights: number[] = [];
+        const tops: number[] = [];
+        let accTop = 0;
+        for (const el of rows) {
+          const h = el.getBoundingClientRect().height || 48;
+          heights.push(h);
+          // center of the row relative to container
+          tops.push(accTop + h / 2);
+          accTop += h;
+        }
+        setRowHeights(heights);
+        setRowTops(tops);
+        // keep rowHeight as a fallback (use first row height)
+        if (Number.isFinite(heights[0])) setRowHeight(heights[0]!);
+      } else {
+        setRowHeights([]);
+        setRowTops([]);
+      }
+    };
+    const ro = new ResizeObserver(measure);
+    ro.observe(containerRef.current);
+    // initial measure
+    measure();
+    return () => ro.disconnect();
+  }, [containerRef]);
 
   return (
     <Card className="p-4 md:p-6 shadow-sm hover:shadow-md transition-shadow animate-slide-up">
@@ -514,12 +532,7 @@ return () => document.removeEventListener("click", handleClick)
               key={i}
               className="flex-1 text-center text-xs py-2 hover:bg-gray-50 cursor-pointer min-w-[60px]"
               onDoubleClick={() => {}}
-              onContextMenu={(e) =>
-                handleContextMenu(e, [
-                  { label: "Add column right", action: () => {} },
-                  { label: "Delete column", action: () => {} },
-                ])
-              }
+              onContextMenu={(e) => { e.preventDefault(); }}
             >
               {typeof label === "string" ? (
     <EditableSpan
@@ -564,6 +577,7 @@ return () => document.removeEventListener("click", handleClick)
         {data.rows.map((rowName, rowIdx) => (
           <div
             key={rowIdx}
+            data-row
             className="flex min-h-[48px] border-b border-gray-200 hover:bg-gray-50 relative group"
             onContextMenu={(e) =>
               handleContextMenu(e, [
@@ -621,15 +635,16 @@ return () => document.removeEventListener("click", handleClick)
           >
             {/* Row label */}
             <div
-              className="w-[120px] flex-shrink-0 px-2 py-3 text-sm font-semibold flex items-center cursor-pointer"
+              className="w-[120px] flex-shrink-0 px-2 py-3 text-sm font-semibold flex items-center cursor-pointer overflow-hidden border-r border-gray-200"
               onDoubleClick={() => {}}
             >
-              {/* inline editable row */}<span tabIndex={0} contentEditable
-  suppressContentEditableWarning
-  className={editableClass}
-  onKeyDown={onEditableKeyDown}
-  onBlur={(e)=>updateRowTitle(data, onChange, rowIdx, (e.target as HTMLElement).innerText.trim())}
->{rowName}</span>
+              {/* inline editable row */}
+              <span tabIndex={0} contentEditable
+                suppressContentEditableWarning
+                className={editableClass + " whitespace-pre-wrap break-words break-all leading-tight block"}
+                onKeyDown={onEditableKeyDown}
+                onBlur={(e)=>updateRowTitle(data, onChange, rowIdx, (e.target as HTMLElement).innerText.trim())}
+              >{rowName}</span>
             </div>
 
             {/* Grid cells */}
@@ -674,7 +689,7 @@ return () => document.removeEventListener("click", handleClick)
                   return (
                     <div
                       key={actualIdx}
-                      className={`absolute top-2 h-8 rounded-md cursor-move flex items-center px-2 text-xs font-semibold text-white transition-shadow ${
+                      className={`absolute top-1/2 -translate-y-1/2 h-8 rounded-md cursor-move flex items-center px-2 text-xs font-semibold text-white transition-shadow ${
                         bar.status === "green"
                           ? "bg-[var(--status-green)]"
                           : bar.status === "yellow"
@@ -683,14 +698,20 @@ return () => document.removeEventListener("click", handleClick)
                       } ${selectedBar === actualIdx ? "ring-2 ring-blue-500" : ""}`}
                       style={{ left: `${left}%`, width: `${width}%` }}
                       onMouseDown={(e) => {
+                        // If user clicked on an editable area (label), don't start drag
+                        const target = e.target as HTMLElement;
+                        if (target?.closest('[data-bar-edit]') || (target as any)?.isContentEditable) {
+                          return;
+                        }
+                        e.preventDefault();
                         if (e.button === 0) {
                           setDragState({
                             type: "bar",
                             idx: actualIdx,
                             startX: e.clientX,
                             startCol: bar.start,
-                          })
-                          setSelectedBar(actualIdx)
+                          });
+                          setSelectedBar(actualIdx);
                         }
                       }}
                       onDoubleClick={() => {}}
@@ -756,7 +777,12 @@ return () => document.removeEventListener("click", handleClick)
                           })
                         }}
                       />
-                      <span className="truncate" data-bar-label={actualIdx} tabIndex={0}>
+                      <span
+                        className="truncate"
+                        data-bar-edit
+                        tabIndex={0}
+                        onMouseDown={(e) => { e.stopPropagation(); }}
+                      >
                         {/* editable bar label */}
                         <EditableSpan
                           value={bar.label ?? ""}
@@ -819,17 +845,26 @@ return () => document.removeEventListener("click", handleClick)
             const cellWidth = (containerWidth - 120) / data.labels.length
             const left = 120 + ms.at * cellWidth + cellWidth / 2
 
-            let top = -30
-            if (ms.row !== null && ms.row >= 0 && ms.row < data.rows.length) {
-              top = ms.row * 48 + 24
+            let top = -30;
+            if (ms.row !== null && ms.row >= 0 && ms.row < rowTops.length) {
+              const barHalfHeight = 16; // h-8 => 32px bar height; half is 16px
+              const rowCenter = rowTops[ms.row] ?? ((ms.row + 0.5) * rowHeight);
+              top = rowCenter - barHalfHeight;
             }
 
             return (
               <div
                 key={msIdx}
-                className={`absolute cursor-move z-20 print:hidden ${selectedMs === msIdx ? "ring-2 ring-blue-500 rounded" : ""}`}
+                className={`absolute cursor-move z-20 print:hidden select-none ${selectedMs === msIdx ? "ring-2 ring-blue-500 rounded" : ""}`}
                 style={{ left: `${left}px`, top: `${top}px`, transform: "translate(-50%, -50%)" }}
                 onMouseDown={(e) => {
+                  // Allow editing label without starting drag
+                  const target = e.target as HTMLElement;
+                  if (target?.closest('[data-ms-edit]') || (target as any)?.isContentEditable) {
+                    e.stopPropagation();
+                    return;
+                  }
+                  e.preventDefault(); e.stopPropagation();
                   if (e.button === 0) {
                     setDragState({
                       type: "milestone",
@@ -845,14 +880,6 @@ return () => document.removeEventListener("click", handleClick)
                   handleContextMenu(e, [
                     {
                       label: (
-                        <span className="flex items-center gap-2">
-                          <Edit2 className="w-4 h-4" /> Edit label
-                        </span>
-                      ),
-                      action: () => {},
-                    },
-                    {
-                      label: (
                         <span className="flex items-center gap-2 text-red-600">
                           <Trash2 className="w-4 h-4" /> Delete milestone
                         </span>
@@ -862,13 +889,20 @@ return () => document.removeEventListener("click", handleClick)
                   ])
                 }
               >
-                <div className="w-5 h-5 bg-[var(--mars-blue-primary)] rotate-45 mx-auto mb-1 shadow-lg border-2 border-white" />
-                <div className="bg-gray-900 text-white px-2 py-1 rounded-full text-[11px] font-semibold whitespace-nowrap max-w-[120px] truncate shadow-md">
-                  {/* editable milestone label */}<EditableSpan value={ms.label ?? ""} onCommit={(t)=> {
-      const milestones = data.milestones.map((m,i)=> i===msIdx ? ({...m, label:t}) : m);
-      onChange({ ...data, milestones });
-    }} />
+                <div
+                  className="text-[10px] font-semibold text-[var(--mars-blue-primary)] text-center whitespace-nowrap -mb-0.5"
+                  data-ms-edit
+                  onMouseDown={(e) => { e.stopPropagation(); }}
+                >
+                  <EditableSpan
+                    value={ms.label ?? ""}
+                    onCommit={(t) => {
+                      const milestones = data.milestones.map((m, i) => i === msIdx ? { ...m, label: t, text: t } : m);
+                      onChange({ ...data, milestones });
+                    }}
+                  />
                 </div>
+                <div className="w-5 h-5 bg-[var(--mars-blue-primary)] rotate-45 mx-auto mb-1 shadow-lg border-2 border-white" />
               </div>
             )
           })}

@@ -1,6 +1,7 @@
 const { app, BrowserWindow, shell } = require('electron')
 const path = require('path')
 const url = require('url')
+const fs = require('fs')
 
 let win
 
@@ -19,12 +20,26 @@ function createWindow () {
 
   win.once('ready-to-show', () => win.show())
 
-  const resourcesRoot = app.isPackaged
-    ? process.resourcesPath
-    : path.resolve(process.cwd())
+  win.webContents.on('did-fail-load', (event, errorCode, errorDesc, validatedURL) => {
+    console.error('[MAIN] did-fail-load', { errorCode, errorDesc, validatedURL })
+    win.webContents.openDevTools({ mode: 'detach' })
+  })
 
-  // В prod ожидаем out/ лежит в extraResources
+  win.webContents.on('render-process-gone', (event, details) => {
+    console.error('[MAIN] render-process-gone', details)
+  })
+
+  const isDev = !app.isPackaged
+  const resourcesRoot = isDev
+    ? path.resolve(process.cwd())
+    : process.resourcesPath
+
+  // В prod ожидаем out/ лежит в extraResources (resourcesPath/out/index.html)
   const outIndex = path.join(resourcesRoot, 'out', 'index.html')
+
+  if (app.isPackaged && !fs.existsSync(outIndex)) {
+    console.error('[MAIN] prod missing index.html at', outIndex)
+  }
 
   // В dev — просто открываем dev-сервер
   if (!app.isPackaged) {
@@ -32,13 +47,17 @@ function createWindow () {
     console.log('[MAIN] dev loadURL:', devURL)
     win.loadURL(devURL)
   } else {
-    const indexURL = url.pathToFileURL(outIndex).toString()
-    console.log('[MAIN] prod loadURL:', indexURL)
-    win.loadURL(indexURL)
+    // В prod — грузим локальный файл, чтобы избежать проблем с file:// и поиском путей
+    console.log('[MAIN] prod loadFile:', outIndex)
+    win.loadFile(outIndex)
   }
 
   win.webContents.setWindowOpenHandler(({ url: target }) => {
-    shell.openExternal(target)
+    if (/^https?:\/\//i.test(target)) {
+      shell.openExternal(target)
+    } else {
+      console.warn('[MAIN] blocked non-http(s) target', target)
+    }
     return { action: 'deny' }
   })
 

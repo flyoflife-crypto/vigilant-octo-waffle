@@ -23,6 +23,7 @@ export default function MarkdownEditable({ value, onChange, className, placehold
   const selEndRef = useRef<number>(0)
   const pendingSel = useRef<{ s: number; e: number } | null>(null)
   const isApplying = useRef(false)
+  const [mode, setMode] = useState<'edit' | 'preview'>('edit');
 
   // синхронизация извне (если не в середине применения операции)
   useEffect(() => {

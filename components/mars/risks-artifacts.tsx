@@ -28,11 +28,52 @@ import { Input } from "@/components/ui/input"
 import { TextFormatMenu } from "@/components/ui/text-format-menu"
 import { Plus, X, Circle } from "lucide-react"
 import type { OnePagerData, StatusColor } from "@/types/onepager"
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useLayoutEffect } from "react"
 
 interface RisksArtifactsProps {
   data: OnePagerData
   setData: (data: OnePagerData) => void
+}
+
+// Auto-growing textarea (no internal scrollbars, grows with content)
+const AutoGrowTextarea: React.FC<{
+  value: string
+  onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void
+  onContextMenu?: (e: React.MouseEvent<HTMLTextAreaElement>) => void
+  placeholder?: string
+  className?: string
+}> = ({ value, onChange, onContextMenu, placeholder, className }) => {
+  const ref = useRef<HTMLTextAreaElement | null>(null)
+
+  const autoresize = () => {
+    const el = ref.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }
+
+  useLayoutEffect(() => { autoresize() }, [])
+  useEffect(() => { autoresize() }, [value])
+
+  return (
+    <textarea
+      ref={ref}
+      value={value}
+      onChange={(e) => { onChange(e) }}
+      onContextMenu={onContextMenu}
+      placeholder={placeholder}
+      rows={1}
+      style={{ overflow: 'hidden', resize: 'none' }}
+      className={
+        (
+          "w-full px-3 py-2 text-sm rounded-md border border-[var(--mars-gray-border)] " +
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mars-blue-primary)] " +
+          "bg-white shadow-sm leading-5 min-h-[36px] " +
+          (className ? className : "")
+        )
+      }
+    />
+  )
 }
 
 export function RisksArtifacts({ data, setData }: RisksArtifactsProps) {
@@ -233,14 +274,13 @@ export function RisksArtifacts({ data, setData }: RisksArtifactsProps) {
           {data.risks.map((risk, idx) => (
             <div
               key={idx}
-              className="grid grid-cols-[1fr_100px_1fr] gap-2 items-center group border-b border-[var(--mars-gray-border)] pb-2 relative"
+              className="grid grid-cols-[1fr_100px_1fr] gap-2 items-start group border-b border-[var(--mars-gray-border)] pb-2 relative"
             >
-              <Input
+              <AutoGrowTextarea
                 value={risk.risk}
                 onChange={(e) => updateRisk(idx, "risk", e.target.value)}
                 onContextMenu={(e) => handleContextMenu(e, "risk", idx)}
                 placeholder="Risk description"
-                className="border-[var(--mars-gray-border)] focus-visible:ring-[var(--mars-blue-primary)] h-9"
               />
 
               <button
@@ -251,7 +291,7 @@ export function RisksArtifacts({ data, setData }: RisksArtifactsProps) {
                 onMouseDown={(e) => handleImpactMouseDown(e, idx)}
                 onMouseUp={handleImpactMouseUp}
                 onMouseLeave={handleImpactMouseUp}
-                className="flex items-center justify-center gap-1 h-9 px-2 rounded border border-[var(--mars-gray-border)] hover:bg-gray-50 transition-colors cursor-pointer"
+                className="self-start flex items-center justify-center gap-1 min-h-[36px] px-2 rounded border border-[var(--mars-gray-border)] hover:bg-gray-50 transition-colors cursor-pointer"
                 title="Right-click or Ctrl+Click to change"
               >
                 <Circle className={`w-4 h-4 fill-current ${getImpactColor(risk.impact)}`} />
@@ -259,12 +299,11 @@ export function RisksArtifacts({ data, setData }: RisksArtifactsProps) {
               </button>
 
               <div className="flex items-center gap-2">
-                <Input
+                <AutoGrowTextarea
                   value={risk.mitigation}
                   onChange={(e) => updateRisk(idx, "mitigation", e.target.value)}
                   onContextMenu={(e) => handleContextMenu(e, "mitigation", idx)}
                   placeholder="Mitigation plan"
-                  className="border-[var(--mars-gray-border)] focus-visible:ring-[var(--mars-blue-primary)] h-9"
                 />
                 <Button
                   variant="ghost"

@@ -36,6 +36,10 @@ import {
   type HistoryState,
 } from "@/lib/history"
 
+import { Settings as SettingsIcon } from "lucide-react"
+import { Switch } from "@/components/ui/switch"
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu"
+
 const QUARTER_PERIODS: number[][] = [
   [1, 2, 3], // Q1
   [4, 5, 6], // Q2
@@ -78,6 +82,29 @@ export default function OnePagerPage() {
   const [data, setData] = useState<OnePagerData | null>(null)
   const [history, setHistory] = useState<HistoryState | null>(null)
   const [showTopMenu, setShowTopMenu] = useState(false)
+
+  // Runtime feature toggles (persisted in localStorage)
+  const [showTP, setShowTP] = useState(true)
+  const [showComments, setShowComments] = useState(true)
+
+  useEffect(() => {
+    try {
+      const tp = typeof window !== 'undefined' ? localStorage.getItem('tp') : null
+      const cm = typeof window !== 'undefined' ? localStorage.getItem('comments') : null
+      if (tp !== null) setShowTP(tp === '1')
+      if (cm !== null) setShowComments(cm === '1')
+    } catch {}
+  }, [])
+
+  const setShowTPAndPersist = (v: boolean) => {
+    setShowTP(v)
+    try { localStorage.setItem('tp', v ? '1' : '0') } catch {}
+  }
+
+  const setShowCommentsAndPersist = (v: boolean) => {
+    setShowComments(v)
+    try { localStorage.setItem('comments', v ? '1' : '0') } catch {}
+  }
 
   const isInitialMount = useRef(true)
   const lastSavedData = useRef<string>("")
@@ -467,16 +494,41 @@ export default function OnePagerPage() {
                   onDuplicate={handleDuplicate}
                 />
 
-                <TopButtons
-                  onExportJSON={handleExportJSON}
-                  onImportJSON={handleImportJSON}
-                  onExportPDF={handleExportPDF}
-                  onExportPNG={handleExportPNG}
-                  onUndo={handleUndo}
-                  onRedo={handleRedo}
-                  canUndo={history ? canUndo(history) : false}
-                  canRedo={history ? canRedo(history) : false}
-                />
+                <div className="flex items-center gap-2">
+                  <TopButtons
+                    onExportJSON={handleExportJSON}
+                    onImportJSON={handleImportJSON}
+                    onExportPDF={handleExportPDF}
+                    onExportPNG={handleExportPNG}
+                    onUndo={handleUndo}
+                    onRedo={handleRedo}
+                    canUndo={history ? canUndo(history) : false}
+                    canRedo={history ? canRedo(history) : false}
+                  />
+
+                  {/* Settings dropdown for feature toggles */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label="Settings"
+                        className="p-2 rounded-md border bg-white hover:bg-gray-50"
+                      >
+                        <SettingsIcon className="h-4 w-4" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-64">
+                      <DropdownMenuItem className="flex items-center justify-between">
+                        <span>Team Performance</span>
+                        <Switch checked={showTP} onCheckedChange={setShowTPAndPersist} />
+                      </DropdownMenuItem>
+                      <DropdownMenuItem className="flex items-center justify-between">
+                        <span>Comments</span>
+                        <Switch checked={showComments} onCheckedChange={setShowCommentsAndPersist} />
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               </div>
             </div>
           </div>
@@ -507,11 +559,11 @@ export default function OnePagerPage() {
 
           <DoneNext data={data} setData={setData} />
 
-          <TeamPerformance data={data} setData={setData} />
+          {showTP && <TeamPerformance data={data} setData={setData} />}
 
           <RisksArtifacts data={data} setData={setData} />
 
-          <Comments data={data} setData={setData} />
+          {showComments && <Comments data={data} setData={setData} />}
 
           <ExtraSections data={data} setData={setData} />
         </div>
