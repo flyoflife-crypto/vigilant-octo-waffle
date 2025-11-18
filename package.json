@@ -1,0 +1,58 @@
+{
+  "name": "mars-onepager",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Mars OnePager — Next 14 (static export) + Electron",
+  "main": "electron/main.js",
+  "license": "MIT",
+  "scripts": {
+    "dev:web": "next dev",
+    "build:web": "next build",
+    "start:web": "next start",
+    "dev:electron": "cross-env ELECTRON_START_URL=http://localhost:3000 electron .",
+    "pack:dir": "electron-builder --win dir --publish=never",
+    "pack": "electron-builder --win nsis --publish=never",
+    "build:all": "npm run build:web && npm run pack:dir"
+  },
+  "dependencies": {
+    "next": "14.2.33",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "electron": "31.7.7",
+    "electron-builder": "24.13.3"
+  },
+  "build": {
+    "appId": "com.mars.onepager",
+    "productName": "Mars OnePager",
+    "asar": true,
+    "files": [
+      "electron/**",
+      "out/**",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "out/**"
+    ],
+    "extraMetadata": {
+      "main": "electron/main.js"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "dir",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "Mars-OnePager-${version}.exe",
+      "requestedExecutionLevel": "asInvoker",
+      "sign": false,
+      "signAndEditExecutable": false
+    },
+    "directories": {
+      "output": "dist"
+    }
+  }
+}
