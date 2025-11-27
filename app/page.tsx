@@ -236,49 +236,87 @@ export default function OnePagerPage() {
   }, [])
 
   useEffect(() => {
-    const projects = getAllProjects()
-    const activeId = getActiveProjectId()
+    let isMounted = true
 
-    if (projects.length === 0) {
-      const newProject = createNewProject("My First Project")
-      saveProject(newProject)
-      setActiveProjectId(newProject.id)
-      setCurrentProject(newProject)
-      setData(newProject.data)
-      setHistory(loadHistoryFromStorage(newProject.id, newProject.data))
-      lastSavedData.current = JSON.stringify(newProject.data)
-    } else {
-      const active = projects.find((p) => p.id === activeId) || projects[0]
-      setCurrentProject(active)
-      setData(active.data)
-      setActiveProjectId(active.id)
-      setHistory(loadHistoryFromStorage(active.id, active.data))
-      lastSavedData.current = JSON.stringify(active.data)
+    const init = async () => {
+      try {
+        const projects = await getAllProjects()
+        const activeId = getActiveProjectId()
+
+        if (!isMounted) return
+
+        if (projects.length === 0) {
+          const newProject = createNewProject("My First Project")
+          const savedProject = await saveProject(newProject)
+          if (!isMounted) return
+          setActiveProjectId(savedProject.id)
+          setCurrentProject(savedProject)
+          setData(savedProject.data)
+          setHistory(loadHistoryFromStorage(savedProject.id, savedProject.data))
+          lastSavedData.current = JSON.stringify(savedProject.data)
+        } else {
+          const active = projects.find((p) => p.id === activeId) || projects[0]
+          setCurrentProject(active)
+          setData(active.data)
+          setActiveProjectId(active.id)
+          setHistory(loadHistoryFromStorage(active.id, active.data))
+          lastSavedData.current = JSON.stringify(active.data)
+        }
+      } catch (error) {
+        console.error(error)
+      } finally {
+        if (isMounted) {
+          isInitialMount.current = false
+        }
+      }
     }
 
-    isInitialMount.current = false
+    void init()
+
+    return () => {
+      isMounted = false
+    }
   }, [])
 
   useEffect(() => {
     if (isInitialMount.current || !currentProject || !data || !history) return
 
-    const currentDataString = JSON.stringify(data)
-    if (currentDataString === lastSavedData.current) return
+    let cancelled = false
 
-    lastSavedData.current = currentDataString
+    const persist = async () => {
+      const currentDataString = JSON.stringify(data)
+      if (currentDataString === lastSavedData.current) return
 
-    const updatedProject = {
-      ...currentProject,
-      data,
-      updatedAt: new Date().toISOString(),
+      const updatedProject = {
+        ...currentProject,
+        data,
+        updatedAt: new Date().toISOString(),
+      }
+
+      try {
+        const savedProject = await saveProject(updatedProject)
+        if (cancelled) return
+
+        lastSavedData.current = currentDataString
+        setCurrentProject(savedProject)
+
+        const newHistory = pushHistory(history, data)
+        setHistory(newHistory)
+        saveHistoryToStorage(savedProject.id, newHistory)
+        if (savedProject.id !== currentProject.id) {
+          setActiveProjectId(savedProject.id)
+        }
+      } catch (error) {
+        console.error(error)
+      }
     }
-    saveProject(updatedProject)
-    setCurrentProject(updatedProject)
 
-    const newHistory = pushHistory(history, data)
-    setHistory(newHistory)
-    saveHistoryToStorage(currentProject.id, newHistory)
-  }, [data])
+    void persist()
+
+    return () => {
+      cancelled = true
+    }
+  }, [data, currentProject, history])
 
   const handleUndo = useCallback(() => {
     if (!history || !canUndo(history)) return
@@ -309,37 +347,47 @@ export default function OnePagerPage() {
   }, [history, currentProject, toast])
 
   const handleCreateNew = useCallback(
-    (name: string) => {
+    async (name: string) => {
       const newProject = createNewProject(name)
-      saveProject(newProject)
-      setCurrentProject(newProject)
-      setData(newProject.data)
-      setActiveProjectId(newProject.id)
-      setHistory(createHistoryState(newProject.data))
-      lastSavedData.current = JSON.stringify(newProject.data)
-      toast({
-        title: "Project created",
-        description: `Created new project "${name}"`,
-      })
+      try {
+        const savedProject = await saveProject(newProject)
+        setCurrentProject(savedProject)
+        setData(savedProject.data)
+        setActiveProjectId(savedProject.id)
+        setHistory(createHistoryState(savedProject.data))
+        lastSavedData.current = JSON.stringify(savedProject.data)
+        toast({
+          title: "Project created",
+          description: `Created new project "${name}"`,
+        })
+      } catch (error) {
+        console.error(error)
+        toast({ variant: "destructive", title: "Failed to create project" })
+      }
     },
     [toast],
   )
 
   const handleDuplicate = useCallback(
-    (project: Project) => {
+    async (project: Project) => {
       const newName = prompt("Enter name for duplicated project:", `${project.name} (Copy)`)
       if (newName) {
         const newProject = createNewProject(newName, project.data)
-        saveProject(newProject)
-        setCurrentProject(newProject)
-        setData(newProject.data)
-        setActiveProjectId(newProject.id)
-        setHistory(createHistoryState(newProject.data))
-        lastSavedData.current = JSON.stringify(newProject.data)
-        toast({
-          title: "Project duplicated",
-          description: `Created "${newName}" from "${project.name}"`,
-        })
+        try {
+          const savedProject = await saveProject(newProject)
+          setCurrentProject(savedProject)
+          setData(savedProject.data)
+          setActiveProjectId(savedProject.id)
+          setHistory(createHistoryState(savedProject.data))
+          lastSavedData.current = JSON.stringify(savedProject.data)
+          toast({
+            title: "Project duplicated",
+            description: `Created "${newName}" from "${project.name}"`,
+          })
+        } catch (error) {
+          console.error(error)
+          toast({ variant: "destructive", title: "Failed to duplicate project" })
+        }
       }
     },
     [toast],
