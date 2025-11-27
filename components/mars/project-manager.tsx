@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -17,7 +17,30 @@ interface ProjectManagerProps {
 export function ProjectManager({ currentProjectId, onSelectProject, onCreateNew, onDuplicate }: ProjectManagerProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [newProjectName, setNewProjectName] = useState("")
-  const projects = getAllProjects()
+  const [projects, setProjects] = useState<Project[]>([])
+  const [loading, setLoading] = useState(false)
+
+  const refreshProjects = useCallback(async () => {
+    setLoading(true)
+    try {
+      const all = await getAllProjects()
+      setProjects(all)
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshProjects()
+  }, [refreshProjects])
+
+  useEffect(() => {
+    if (isOpen) {
+      void refreshProjects()
+    }
+  }, [isOpen, refreshProjects, currentProjectId])
 
   const handleCreate = () => {
     if (newProjectName.trim()) {
@@ -26,10 +49,10 @@ export function ProjectManager({ currentProjectId, onSelectProject, onCreateNew,
     }
   }
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (confirm("Are you sure you want to delete this project?")) {
-      deleteProject(id)
-      window.location.reload()
+      await deleteProject(id)
+      await refreshProjects()
     }
   }
 
@@ -62,7 +85,9 @@ export function ProjectManager({ currentProjectId, onSelectProject, onCreateNew,
 
             {/* Project list */}
             <div className="space-y-2 max-h-96 overflow-y-auto">
-              {projects.length === 0 ? (
+              {loading ? (
+                <p className="text-sm text-gray-500 text-center py-4">Loading projects...</p>
+              ) : projects.length === 0 ? (
                 <p className="text-sm text-gray-500 text-center py-4">No projects yet. Create your first one!</p>
               ) : (
                 projects.map((project) => (

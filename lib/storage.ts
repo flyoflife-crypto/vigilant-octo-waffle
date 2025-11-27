@@ -8,8 +8,11 @@ export interface Project {
   updatedAt: string
 }
 
-const STORAGE_KEY = "mars-onepager-projects"
 const ACTIVE_PROJECT_KEY = "mars-onepager-active"
+
+const SHAREPOINT_SITE_URL =
+  process.env.NEXT_PUBLIC_SHAREPOINT_SITE_URL ?? ""
+const ONEPAGER_LIST_NAME = "OnePagerProjects"
 
 export const WEEK_COUNT = 52
 export const PERIOD_COUNT = 13
@@ -30,10 +33,94 @@ export const QUARTER_PERIODS: number[][] = [
   [10, 11, 12, 13], // Q4
 ]
 
-export function getAllProjects(): Project[] {
+async function spRequest<T = any>(path: string, options: RequestInit = {}): Promise<T> {
+  if (typeof window === "undefined") {
+    throw new Error("SharePoint API is only available in the browser")
+  }
+
+  if (!SHAREPOINT_SITE_URL) {
+    throw new Error("SHAREPOINT_SITE_URL is not configured")
+  }
+
+  const url = `${SHAREPOINT_SITE_URL}/_api/web/lists/getbytitle('${ONEPAGER_LIST_NAME}')${path}`
+
+  const res = await fetch(url, {
+    method: options.method ?? "GET",
+    headers: {
+      Accept: "application/json;odata=nometadata",
+      "Content-Type": "application/json;odata=nometadata",
+      ...(options.headers ?? {}),
+    },
+    credentials: "include",
+    body: options.body,
+  })
+
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`SharePoint request failed: ${res.status} ${res.statusText} – ${text}`)
+  }
+
+  return (await res.json()) as T
+}
+
+interface SharePointItem {
+  ID: number
+  Title: string
+  ProjectStatus?: string
+  NiicDate?: string
+  DataJson?: string
+  Created: string
+  Modified: string
+}
+
+export async function getAllProjects(): Promise<Project[]> {
   if (typeof window === "undefined") return []
-  const stored = localStorage.getItem(STORAGE_KEY)
-  return stored ? JSON.parse(stored) : []
+
+  const data = await spRequest<{ value: SharePointItem[] }>(
+    "/items?$select=ID,Title,ProjectStatus,NiicDate,DataJson,Created,Modified",
+  )
+
+  return data.value.map((item) => {
+    const parsedData: OnePagerData = item.DataJson
+      ? JSON.parse(item.DataJson)
+      : ({
+          projectName: item.Title,
+          niicDate: item.NiicDate ?? new Date().toISOString().slice(0, 7),
+        } as any)
+
+    return {
+      id: item.ID.toString(),
+      name: item.Title,
+      data: parsedData,
+      createdAt: item.Created,
+      updatedAt: item.Modified,
+    }
+  })
+}
+
+export async function getProjectById(id: string): Promise<Project | null> {
+  if (!id) return null
+  const numericId = Number(id)
+  if (!Number.isFinite(numericId)) return null
+
+  const item = await spRequest<SharePointItem>(
+    `/items(${numericId})?$select=ID,Title,ProjectStatus,NiicDate,DataJson,Created,Modified`,
+  )
+
+  const parsedData: OnePagerData = item.DataJson
+    ? JSON.parse(item.DataJson)
+    : ({
+        projectName: item.Title,
+        niicDate: item.NiicDate ?? new Date().toISOString().slice(0, 7),
+      } as any)
+
+  return {
+    id: item.ID.toString(),
+    name: item.Title,
+    data: parsedData,
+    createdAt: item.Created,
+    updatedAt: item.Modified,
+  }
 }
 
 export function getActiveProjectId(): string | null {
@@ -45,22 +132,67 @@ export function setActiveProjectId(id: string) {
   localStorage.setItem(ACTIVE_PROJECT_KEY, id)
 }
 
-export function saveProject(project: Project) {
-  const projects = getAllProjects()
-  const index = projects.findIndex((p) => p.id === project.id)
-
-  if (index >= 0) {
-    projects[index] = { ...project, updatedAt: new Date().toISOString() }
-  } else {
-    projects.push(project)
+async function upsertSharePointItem(project: Project): Promise<SharePointItem> {
+  const payload = {
+    Title: project.name,
+    ProjectStatus: project.data.projectStatus,
+    NiicDate: project.data.niicDate,
+    DataJson: JSON.stringify(project.data),
   }
 
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(projects))
+  if (!project.id) {
+    const created = await spRequest<SharePointItem>("/items", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    })
+    return created
+  }
+
+  const numericId = Number(project.id)
+  if (!Number.isFinite(numericId)) {
+    const created = await spRequest<SharePointItem>("/items", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    })
+    return created
+  }
+
+  const updated = await spRequest<SharePointItem>(`/items(${numericId})`, {
+    method: "PATCH",
+    headers: {
+      "IF-MATCH": "*",
+      "X-HTTP-Method": "MERGE",
+    },
+    body: JSON.stringify(payload),
+  })
+  return updated
 }
 
-export function deleteProject(id: string) {
-  const projects = getAllProjects().filter((p) => p.id !== id)
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(projects))
+export async function saveProject(project: Project): Promise<Project> {
+  const spItem = await upsertSharePointItem(project)
+
+  return {
+    id: spItem.ID.toString(),
+    name: spItem.Title,
+    data: project.data,
+    createdAt: spItem.Created,
+    updatedAt: spItem.Modified,
+  }
+}
+
+export async function deleteProject(id: string): Promise<void> {
+  if (!id) return
+
+  const numericId = Number(id)
+  if (!Number.isFinite(numericId)) return
+
+  await spRequest<void>(`/items(${numericId})`, {
+    method: "POST",
+    headers: {
+      "IF-MATCH": "*",
+      "X-HTTP-Method": "DELETE",
+    },
+  })
 
   if (getActiveProjectId() === id) {
     localStorage.removeItem(ACTIVE_PROJECT_KEY)
@@ -159,7 +291,7 @@ export function createNewProject(name: string, templateData?: OnePagerData): Pro
   }
 
   return {
-    id: `project-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    id: "",
     name,
     data: defaultData,
     createdAt: new Date().toISOString(),
