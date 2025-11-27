@@ -10,8 +10,8 @@ import { Plus, Trash2, Copy, FolderOpen } from "lucide-react"
 interface ProjectManagerProps {
   currentProjectId: string | null
   onSelectProject: (project: Project) => void
-  onCreateNew: (name: string) => void
-  onDuplicate: (project: Project) => void
+  onCreateNew: (name: string) => Promise<void>
+  onDuplicate: (project: Project) => Promise<void>
 }
 
 export function ProjectManager({ currentProjectId, onSelectProject, onCreateNew, onDuplicate }: ProjectManagerProps) {
@@ -20,21 +20,40 @@ export function ProjectManager({ currentProjectId, onSelectProject, onCreateNew,
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(false)
 
+  useEffect(() => {
+    let cancelled = false
+
+    const load = async () => {
+      setLoading(true)
+      try {
+        const all = await getAllProjects()
+        if (!cancelled) {
+          setProjects(all)
+        }
+      } catch (error) {
+        console.error(error)
+      } finally {
+        if (!cancelled) {
+          setLoading(false)
+        }
+      }
+    }
+
+    void load()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const refreshProjects = useCallback(async () => {
-    setLoading(true)
     try {
       const all = await getAllProjects()
       setProjects(all)
     } catch (error) {
       console.error(error)
-    } finally {
-      setLoading(false)
     }
   }, [])
-
-  useEffect(() => {
-    void refreshProjects()
-  }, [refreshProjects])
 
   useEffect(() => {
     if (isOpen) {
@@ -44,15 +63,19 @@ export function ProjectManager({ currentProjectId, onSelectProject, onCreateNew,
 
   const handleCreate = () => {
     if (newProjectName.trim()) {
-      onCreateNew(newProjectName.trim())
+      void onCreateNew(newProjectName.trim())
       setNewProjectName("")
     }
   }
 
   const handleDelete = async (id: string) => {
     if (confirm("Are you sure you want to delete this project?")) {
-      await deleteProject(id)
-      await refreshProjects()
+      try {
+        await deleteProject(id)
+        setProjects((prev) => prev.filter((p) => p.id !== id))
+      } catch (error) {
+        console.error(error)
+      }
     }
   }
 

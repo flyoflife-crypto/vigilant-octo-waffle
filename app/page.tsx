@@ -236,26 +236,31 @@ export default function OnePagerPage() {
   }, [])
 
   useEffect(() => {
-    let isMounted = true
+    let cancelled = false
 
     const init = async () => {
       try {
         const projects = await getAllProjects()
         const activeId = getActiveProjectId()
 
-        if (!isMounted) return
+        if (cancelled) return
 
         if (projects.length === 0) {
           const newProject = createNewProject("My First Project")
-          const savedProject = await saveProject(newProject)
-          if (!isMounted) return
-          setActiveProjectId(savedProject.id)
-          setCurrentProject(savedProject)
-          setData(savedProject.data)
-          setHistory(loadHistoryFromStorage(savedProject.id, savedProject.data))
-          lastSavedData.current = JSON.stringify(savedProject.data)
+          try {
+            const savedProject = await saveProject(newProject)
+            if (cancelled) return
+            setActiveProjectId(savedProject.id)
+            setCurrentProject(savedProject)
+            setData(savedProject.data)
+            setHistory(loadHistoryFromStorage(savedProject.id, savedProject.data))
+            lastSavedData.current = JSON.stringify(savedProject.data)
+          } catch (error) {
+            throw error
+          }
         } else {
           const active = projects.find((p) => p.id === activeId) || projects[0]
+          if (cancelled) return
           setCurrentProject(active)
           setData(active.data)
           setActiveProjectId(active.id)
@@ -264,8 +269,9 @@ export default function OnePagerPage() {
         }
       } catch (error) {
         console.error(error)
+        toast({ variant: "destructive", title: "Failed to load projects from SharePoint" })
       } finally {
-        if (isMounted) {
+        if (!cancelled) {
           isInitialMount.current = false
         }
       }
@@ -274,49 +280,42 @@ export default function OnePagerPage() {
     void init()
 
     return () => {
-      isMounted = false
+      cancelled = true
     }
-  }, [])
+  }, [toast])
 
   useEffect(() => {
     if (isInitialMount.current || !currentProject || !data || !history) return
 
-    let cancelled = false
+    const currentDataString = JSON.stringify(data)
+    if (currentDataString === lastSavedData.current) return
 
-    const persist = async () => {
-      const currentDataString = JSON.stringify(data)
-      if (currentDataString === lastSavedData.current) return
+    lastSavedData.current = currentDataString
 
-      const updatedProject = {
-        ...currentProject,
-        data,
-        updatedAt: new Date().toISOString(),
-      }
+    const updatedProject: Project = {
+      ...currentProject,
+      data,
+      updatedAt: new Date().toISOString(),
+    }
 
+    setCurrentProject(updatedProject)
+
+    const newHistory = pushHistory(history, data)
+    setHistory(newHistory)
+    saveHistoryToStorage(updatedProject.id, newHistory)
+
+    ;(async () => {
       try {
-        const savedProject = await saveProject(updatedProject)
-        if (cancelled) return
-
-        lastSavedData.current = currentDataString
-        setCurrentProject(savedProject)
-
-        const newHistory = pushHistory(history, data)
-        setHistory(newHistory)
-        saveHistoryToStorage(savedProject.id, newHistory)
-        if (savedProject.id !== currentProject.id) {
-          setActiveProjectId(savedProject.id)
-        }
-      } catch (error) {
-        console.error(error)
+        await saveProject(updatedProject)
+      } catch (e) {
+        console.error(e)
+        toast({
+          variant: "destructive",
+          title: "Failed to save project to SharePoint",
+        })
       }
-    }
-
-    void persist()
-
-    return () => {
-      cancelled = true
-    }
-  }, [data, currentProject, history])
+    })()
+  }, [data, currentProject, history, toast])
 
   const handleUndo = useCallback(() => {
     if (!history || !canUndo(history)) return
