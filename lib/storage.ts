@@ -39,7 +39,9 @@ async function spRequest<T = any>(path: string, options: RequestInit = {}): Prom
   }
 
   if (!SHAREPOINT_SITE_URL) {
-    throw new Error("SHAREPOINT_SITE_URL is not configured")
+    // If SharePoint is not configured, return mock data or use localStorage only
+    console.warn("SharePoint URL not configured, using local storage only")
+    throw new Error("SharePoint is not configured. Please set NEXT_PUBLIC_SHAREPOINT_SITE_URL environment variable.")
   }
 
   const url = `${SHAREPOINT_SITE_URL}/_api/web/lists/getbytitle('${ONEPAGER_LIST_NAME}')${path}`
